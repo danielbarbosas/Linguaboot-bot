@@ -2,9 +2,10 @@ import os
 import threading
 from flask import Flask
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+print(f"BOT_TOKEN existe? {bool(BOT_TOKEN)}")
 
 app = Flask(__name__)
 
@@ -12,20 +13,25 @@ app = Flask(__name__)
 def home():
     return "LinguaBoot Bot Online 24h!"
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context):
     await update.message.reply_text(
         "Olá! Eu sou o LinguaBoot 🤖📚\n\n"
         "Seu professor de idiomas!\n"
-        "Me manda um áudio em inglês, espanhol, francês... que eu corrijo na hora!"
+        "Me manda um áudio em inglês, espanhol..."
     )
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Recebi! Em breve vou corrigir áudios também. Por enquanto, manda texto que a gente pratica!")
+async def handle_message(update: Update, context):
+    await update.message.reply_text("Recebi sua mensagem! Processando...")
 
 def run_bot():
+    print("Iniciando bot do Telegram...")
+    if not BOT_TOKEN:
+        print("ERRO: BOT_TOKEN não encontrado!")
+        return
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.ALL, handle_message))
+    print("Bot started - polling...")
     application.run_polling()
 
 def run_flask():
