@@ -2,6 +2,7 @@ import os
 import io
 import asyncio
 import threading
+import tempfile
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -135,7 +136,7 @@ async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TY
         elif update.callback_query:
             await update.callback_query.message.edit_text(msg, parse_mode="Markdown", reply_markup=markup)
     except Exception as e:
-        print(f"Edição de menu ignorada (conteúdo idêntico): {e}", flush=True)
+        print(f"Aviso de menu: {e}", flush=True)
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -214,7 +215,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         data["voz"] = voices.get(idioma_atual, "en-US-AriaNeural")
         
-        # Confirmação visual da alteração da voz
         msg_confirmacao = f"✅ Voz alterada para **{'Feminina' if cb == 'set_voz_fem' else 'Masculina'}** com sucesso!"
         kb = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="voltar_menu")]]
         try:
@@ -236,6 +236,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     contents = []
+    temp_audio_path = None
 
     if update.message.voice or update.message.audio:
         await update.message.reply_text("🎙️ Ouvindo seu áudio...")
@@ -244,14 +245,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             new_file = await context.bot.get_file(file_id)
             audio_bytes = await new_file.download_as_bytearray()
             
-            contents.append({
-                "mime_type": "audio/ogg",
-                "data": bytes(audio_bytes)
-            })
-            contents.append("Transcreva o áudio enviado pelo aluno e responda em seguida mantendo o papel de professor de idiomas.")
+            # Escreve o áudio num ficheiro temporário para o genai.upload_file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as temp_file:
+                temp_file.write(bytes(audio_bytes))
+                temp_audio_path = temp_file.name
+
+            # Faz o upload oficial para a API do Gemini
+            audio_file = genai.upload_file(temp_audio_path)
+            contents.append(audio_file)
+            contents.append("Transcreva exatamente o áudio enviado pelo aluno e responda em seguida mantendo o papel de professor de idiomas.")
         except Exception as e:
-            print(f"ERRO AUDIO: {e}", flush=True)
-            await update.message.reply_text("Erro ao carregar o áudio. Tente novamente!")
+            print(f"ERRO AO PROCESSAR ÁUDIO: {e}", flush=True)
+            await update.message.reply_text(f"Erro ao carregar o áudio: {e}")
+            if temp_audio_path and os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
             return
     else:
         contents.append(update.message.text)
@@ -275,7 +282,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         system_prompt += f"Avalie a pronúncia do áudio em {data['idioma']}. Transcreva o que entendeu e passe uma nova frase para repetir."
 
     resposta_ia = None
-    modelos = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
+    ultimo_erro = ""
+    modelos = ["gemini-1.5-flash", "gemini-1.5-pro"]
 
     for m in modelos:
         try:
@@ -284,10 +292,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             resposta_ia = response.text
             break
         except Exception as e:
+            ultimo_erro = str(e)
             print(f"Erro no modelo {m}: {e}", flush=True)
 
+    # Limpeza do ficheiro temporário do áudio
+    if temp_audio_path and os.path.exists(temp_audio_path):
+        os.remove(temp_audio_path)
+
     if not resposta_ia:
-        await update.message.reply_text("Erro na API do Gemini. Verifique se a chave GEMINI_API_KEY está correta no Render.")
+        await update.message.reply_text(f"Erro na API do Gemini: {ultimo_erro}")
         return
 
     try:
