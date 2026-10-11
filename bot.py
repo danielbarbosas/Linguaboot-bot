@@ -1,3 +1,4 @@
+
 import os
 import io
 import asyncio
@@ -12,12 +13,15 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from openai import OpenAI
+from google import genai
+from google.genai import types
+from gtts import gTTS
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+# Inicializa o cliente do Gemini
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 app = Flask(__name__)
 
@@ -29,7 +33,6 @@ def get_user_data(user_id):
             "idioma": "Inglês",
             "nivel": "Iniciante",
             "publico": "Adulto",
-            "voz": "nova",
             "modo": "conversa",
             "historico": []
         }
@@ -37,7 +40,7 @@ def get_user_data(user_id):
 
 @app.route('/')
 def home():
-    return "LinguaBoot Bot Online 24h!"
+    return "LinguaBoot Bot (Gemini Version) Online 24h!"
 
 # --- MENU INTERATIVO ---
 
@@ -47,12 +50,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     mensagem = (
         f"Olá! Eu sou o LinguaBoot 🤖📚\n\n"
-        f"Seu tutor de idiomas interativo!\n\n"
+        f"Seu tutor de idiomas interativo (Movido a Gemini 🤖)!\n\n"
         f"⚙️ Sua Configuração Atual:\n"
         f"• Público: {data['publico']}\n"
         f"• Idioma: {data['idioma']}\n"
         f"• Nível: {data['nivel']}\n"
-        f"• Voz: {'Feminina' if data['voz'] == 'nova' else 'Masculina'}\n"
         f"• Modo: {data['modo'].capitalize()}\n\n"
         f"Escolha uma opção abaixo para ajustar o bot ou começar a praticar!"
     )
@@ -68,8 +70,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("📊 Nível", callback_data="menu_nivel")
         ],
         [
-            InlineKeyboardButton("👨‍👩‍👧 Público (Kids/Adulto)", callback_data="menu_publico"),
-            InlineKeyboardButton("🎙️ Tipo de Voz", callback_data="menu_voz")
+            InlineKeyboardButton("👨‍👩‍👧 Público (Kids/Adulto)", callback_data="menu_publico")
         ]
     ]
 
@@ -122,58 +123,39 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Selecione o perfil de aprendizado:", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
-    if cb == "menu_voz":
-        keyboard = [
-            [InlineKeyboardButton("👩 Feminina (Nova)", callback_data="set_voz_nova")],
-            [InlineKeyboardButton("👨 Masculina (Onyx)", callback_data="set_voz_onyx")],
-            [InlineKeyboardButton("⬅️ Voltar", callback_data="voltar_menu")]
-        ]
-        await query.edit_message_text("Escolha a voz do seu tutor:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-
     if cb.startswith("set_idioma_"):
         data["idioma"] = cb.replace("set_idioma_", "")
     elif cb.startswith("set_nivel_"):
         data["nivel"] = cb.replace("set_nivel_", "")
     elif cb.startswith("set_publico_"):
         data["publico"] = cb.replace("set_publico_", "")
-    elif cb.startswith("set_voz_"):
-        data["voz"] = cb.replace("set_voz_", "")
 
     await start(update, context)
 
-# --- PROCESSAMENTO DE MENSAGENS E ÁUDIOS ---
+# --- PROCESSAMENTO DE MENSAGENS E ÁUDIOS (GEMINI) ---
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = get_user_data(user_id)
     
-    texto_usuario = ""
+    prompt_usuario = ""
+    audio_bytes_data = None
 
     if update.message.voice or update.message.audio:
-        await update.message.reply_text("🎙️ Ouvindo seu áudio...")
+        await update.message.reply_text("🎙️ Ouvindo e processando seu áudio...")
         
         try:
             file_id = (update.message.voice or update.message.audio).file_id
             new_file = await context.bot.get_file(file_id)
+            audio_bytes_data = await new_file.download_as_bytearray()
             
-            audio_bytes = await new_file.download_as_bytearray()
-            audio_buffer = io.BytesIO(audio_bytes)
-            audio_buffer.name = "audio.ogg"
-
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1", 
-                file=audio_buffer
-            )
-            texto_usuario = transcript.text
-            await update.message.reply_text(f"📝 Entendi: \"{texto_usuario}\"")
-
+            prompt_usuario = "Transcreva este áudio e responda ao que foi dito seguindo as instruções de tutor."
         except Exception as e:
-            print(f"ERRO NO WHISPER: {e}", flush=True)
-            await update.message.reply_text("Ocorreu um erro ao processar o áudio. Verifique se sua conta da OpenAI possui saldo de créditos ativo.")
+            print(f"ERRO AO BAIXAR ÁUDIO: {e}", flush=True)
+            await update.message.reply_text("Ocorreu um erro ao baixar o áudio. Tente novamente!")
             return
     else:
-        texto_usuario = update.message.text
+        prompt_usuario = update.message.text
 
     system_prompt = (
         f"Você é o LinguaBoot, um tutor de idiomas especialista.\n"
@@ -188,7 +170,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data["modo"] == "conversa":
         system_prompt += (
-            f"Converse naturally sobre qualquer assunto no idioma {data['idioma']}. "
+            f"Converse naturalmente sobre qualquer assunto no idioma {data['idioma']}. "
             "Ao final da sua resposta, se o aluno cometeu algum erro de gramática ou vocabulário, "
             "adicione uma seção '💡 Dica do Professor:' corrigindo com gentileza em português."
         )
@@ -200,39 +182,57 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data["modo"] == "teste_pronuncia":
         system_prompt += (
             f"Você está avaliando a pronúncia/estrutura do áudio do aluno em {data['idioma']}. "
-            "Avalie a clareza da frase enviada, aponte palavras a melhorar e passe uma nova frase no idioma para ele repetir."
+            "Se for enviado áudio, transcreva primeiro o que entendeu, avalie a clareza, aponte palavras a melhorar e passe uma nova frase no idioma para ele repetir."
         )
 
-    data["historico"].append({"role": "user", "content": texto_usuario})
-    if len(data["historico"]) > 6:
-        data["historico"] = data["historico"][-6:]
+    contents = []
+    
+    # Se enviou áudio, adiciona os bytes diretamente para o Gemini analisar
+    if audio_bytes_data:
+        contents.append(
+            types.Part.from_bytes(
+                data=bytes(audio_bytes_data),
+                mime_type="audio/ogg"
+            )
+        )
 
-    messages = [{"role": "system", "content": system_prompt}] + data["historico"]
+    contents.append(prompt_usuario)
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages
+        # Chamada à API do Gemini
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.7,
+            )
         )
-        resposta_ia = response.choices[0].message.content
-        data["historico"].append({"role": "assistant", "content": resposta_ia})
+        resposta_ia = response.text
 
         await update.message.reply_text(resposta_ia)
 
-        audio_response = client.audio.speech.create(
-            model="tts-1",
-            voice=data["voz"],
-            input=resposta_ia
-        )
-        
-        speech_buffer = io.BytesIO(audio_response.content)
+        # Mapeamento simples de idioma para gTTS
+        lang_code = "en"
+        if data["idioma"] == "Espanhol":
+            lang_code = "es"
+        elif data["idioma"] == "Francês":
+            lang_code = "fr"
+        elif data["idioma"] == "Italiano":
+            lang_code = "it"
+
+        # Geração da resposta em voz com gTTS (Gratuito)
+        tts = gTTS(text=resposta_ia, lang=lang_code)
+        speech_buffer = io.BytesIO()
+        tts.write_to_fp(speech_buffer)
+        speech_buffer.seek(0)
         speech_buffer.name = "response.mp3"
 
         await update.message.reply_voice(voice=speech_buffer)
 
     except Exception as e:
-        print(f"ERRO NA RESPOSTA DA IA/TTS: {e}", flush=True)
-        await update.message.reply_text("Ocorreu um erro ao gerar a resposta da IA.")
+        print(f"ERRO NA RESPOSTA DO GEMINI: {e}", flush=True)
+        await update.message.reply_text(f"Ocorreu um erro na IA: {e}")
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -251,5 +251,5 @@ if __name__ == "__main__":
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.ALL, handle_message))
 
-    print("LinguaBoot rodando com sucesso!", flush=True)
+    print("LinguaBoot (Gemini) rodando com sucesso!", flush=True)
     application.run_polling(drop_pending_updates=True)
