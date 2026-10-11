@@ -28,9 +28,10 @@ user_sessions = {}
 def get_user_data(user_id):
     if user_id not in user_sessions:
         user_sessions[user_id] = {
-            "idioma": "Inglês",
-            "nivel": "Iniciante",
-            "publico": "Adulto",
+            "step": "idioma",  # Etapas do fluxo: idioma -> publico -> nivel -> pronto
+            "idioma": None,
+            "publico": None,
+            "nivel": None,
             "voz": "en-US-AriaNeural",
             "modo": "conversa",
             "historico": []
@@ -39,24 +40,81 @@ def get_user_data(user_id):
 
 @app.route('/')
 def home():
-    return "LinguaBoot Bot Online 24h!"
+    return "LinguaBoot Bot (Gemini) Online 24h!"
 
-# --- MENU INTERATIVO ---
+# --- FLUXO DE PASSO A PASSO (ONBOARDING) E MENUS ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = get_user_data(user_id)
     
+    # Se ainda não completou as configurações iniciais, inicia o passo a passo
+    if not data["idioma"]:
+        data["step"] = "idioma"
+        await enviar_passo_idioma(update, context)
+    elif not data["publico"]:
+        data["step"] = "publico"
+        await enviar_passo_publico(update, context)
+    elif not data["nivel"]:
+        data["step"] = "nivel"
+        await enviar_passo_nivel(update, context)
+    else:
+        data["step"] = "pronto"
+        await enviar_menu_principal(update, context)
+
+async def enviar_passo_idioma(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mensagem = "👋 Olá! Bem-vindo ao **LinguaBoot** 🤖📚\n\n**Passo 1/3:** Qual idioma você deseja praticar?"
+    keyboard = [
+        [InlineKeyboardButton("🇺🇸 Inglês", callback_data="set_idioma_Inglês"), InlineKeyboardButton("🇪🇸 Espanhol", callback_data="set_idioma_Espanhol")],
+        [InlineKeyboardButton("🇫🇷 Francês", callback_data="set_idioma_Francês"), InlineKeyboardButton("🇮🇹 Italiano", callback_data="set_idioma_Italiano")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.message:
+        await update.message.reply_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+    elif update.callback_query:
+        await update.callback_query.message.edit_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+
+async def enviar_passo_publico(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
+    data = get_user_data(user_id)
+    
+    mensagem = f"✅ Idioma: **{data['idioma']}**\n\n**Passo 2/3:** Qual é o perfil de aprendizado?"
+    keyboard = [
+        [InlineKeyboardButton("👤 Adulto", callback_data="set_publico_Adulto")],
+        [InlineKeyboardButton("👧 Modo Kids (Crianças)", callback_data="set_publico_Kids")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        await update.callback_query.message.edit_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+
+async def enviar_passo_nivel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
+    data = get_user_data(user_id)
+    
+    mensagem = f"✅ Idioma: **{data['idioma']}**\n✅ Público: **{data['publico']}**\n\n**Passo 3/3:** Escolha o seu nível de conhecimento:"
+    keyboard = [
+        [InlineKeyboardButton("Iniciante (A1-A2)", callback_data="set_nivel_Iniciante")],
+        [InlineKeyboardButton("Intermediário (B1-B2)", callback_data="set_nivel_Intermediário")],
+        [InlineKeyboardButton("Avançado (C1-C2)", callback_data="set_nivel_Avançado")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        await update.callback_query.message.edit_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+
+async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
+    data = get_user_data(user_id)
+    
     mensagem = (
-        f"Olá! Eu sou o LinguaBoot 🤖📚\n\n"
-        f"Seu tutor de idiomas interativo (100% Gratuito)!\n\n"
-        f"⚙️ Sua Configuração Atual:\n"
-        f"• Público: {data['publico']}\n"
-        f"• Idioma: {data['idioma']}\n"
-        f"• Nível: {data['nivel']}\n"
-        f"• Voz: {'Feminina' if 'Aria' in data['voz'] or 'Elvira' in data['voz'] or 'Denise' in data['voz'] or 'Elsa' in data['voz'] else 'Masculina'}\n"
-        f"• Modo: {data['modo'].capitalize()}\n\n"
-        f"Escolha uma opção abaixo para ajustar o bot ou começar a praticar!"
+        f"🎯 **Tudo pronto! Seu perfil foi configurado:**\n\n"
+        f"• **Idioma:** {data['idioma']}\n"
+        f"• **Público:** {data['publico']}\n"
+        f"• **Nível:** {data['nivel']}\n"
+        f"• **Modo Ativo:** {data['modo'].capitalize()}\n\n"
+        f"Escolha um modo de estudo para começar ou reconfigure o perfil:"
     )
 
     keyboard = [
@@ -66,21 +124,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🎙️ Teste Pronúncia", callback_data="set_modo_teste_pronuncia")
         ],
         [
-            InlineKeyboardButton("🌐 Idioma", callback_data="menu_idioma"),
-            InlineKeyboardButton("📊 Nível", callback_data="menu_nivel")
-        ],
-        [
-            InlineKeyboardButton("👨‍👩‍👧 Público (Kids/Adulto)", callback_data="menu_publico"),
-            InlineKeyboardButton("🎙️ Tipo de Voz", callback_data="menu_voz")
+            InlineKeyboardButton("🎙️ Alterar Voz (M/F)", callback_data="menu_voz"),
+            InlineKeyboardButton("⚙️ Refazer Configuração", callback_data="reset_config")
         ]
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     if update.message:
-        await update.message.reply_text(mensagem, reply_markup=reply_markup)
+        await update.message.reply_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
     elif update.callback_query:
-        await update.callback_query.message.edit_text(mensagem, reply_markup=reply_markup)
+        await update.callback_query.message.edit_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+
+# --- HANDLER DOS BOTÕES ---
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -90,52 +146,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     cb = query.data
 
-    if cb.startswith("set_modo_"):
-        modo_limpo = cb.replace("set_modo_", "")
-        data["modo"] = modo_limpo
-        await query.edit_message_text(f"✅ Modo alterado para {modo_limpo.capitalize()}!\nPode mandar uma mensagem de texto ou áudio para começarmos.")
-        return
-
-    if cb == "menu_idioma":
-        keyboard = [
-            [InlineKeyboardButton("🇺🇸 Inglês", callback_data="set_idioma_Inglês"), InlineKeyboardButton("🇪🇸 Espanhol", callback_data="set_idioma_Espanhol")],
-            [InlineKeyboardButton("🇫🇷 Francês", callback_data="set_idioma_Francês"), InlineKeyboardButton("🇮🇹 Italiano", callback_data="set_idioma_Italiano")],
-            [InlineKeyboardButton("⬅️ Voltar", callback_data="voltar_menu")]
-        ]
-        await query.edit_message_text("Escolha o idioma que deseja praticar:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-
-    if cb == "menu_nivel":
-        keyboard = [
-            [InlineKeyboardButton("Iniciante (A1-A2)", callback_data="set_nivel_Iniciante")],
-            [InlineKeyboardButton("Intermediário (B1-B2)", callback_data="set_nivel_Intermediário")],
-            [InlineKeyboardButton("Avançado (C1-C2)", callback_data="set_nivel_Avançado")],
-            [InlineKeyboardButton("⬅️ Voltar", callback_data="voltar_menu")]
-        ]
-        await query.edit_message_text("Escolha seu nível de conhecimento:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-
-    if cb == "menu_publico":
-        keyboard = [
-            [InlineKeyboardButton("👤 Adulto", callback_data="set_publico_Adulto")],
-            [InlineKeyboardButton("👧 Modo Kids (Crianças)", callback_data="set_publico_Kids")],
-            [InlineKeyboardButton("⬅️ Voltar", callback_data="voltar_menu")]
-        ]
-        await query.edit_message_text("Selecione o perfil de aprendizado:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-
-    if cb == "menu_voz":
-        keyboard = [
-            [InlineKeyboardButton("👩 Feminina", callback_data="set_voz_fem")],
-            [InlineKeyboardButton("👨 Masculina", callback_data="set_voz_masc")],
-            [InlineKeyboardButton("⬅️ Voltar", callback_data="voltar_menu")]
-        ]
-        await query.edit_message_text("Escolha a voz do seu tutor:", reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-
+    # Etapa 1: Seleção de Idioma
     if cb.startswith("set_idioma_"):
         data["idioma"] = cb.replace("set_idioma_", "")
-        # Ajusta voz padrão para o idioma selecionado
+        
+        # Define voz padrão por idioma
         if data["idioma"] == "Inglês":
             data["voz"] = "en-US-AriaNeural"
         elif data["idioma"] == "Espanhol":
@@ -145,25 +160,74 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif data["idioma"] == "Italiano":
             data["voz"] = "it-IT-ElsaNeural"
 
-    elif cb.startswith("set_nivel_"):
-        data["nivel"] = cb.replace("set_nivel_", "")
-    elif cb.startswith("set_publico_"):
+        await enviar_passo_publico(update, context)
+        return
+
+    # Etapa 2: Seleção de Público
+    if cb.startswith("set_publico_"):
         data["publico"] = cb.replace("set_publico_", "")
-    elif cb == "set_voz_fem":
+        await enviar_passo_nivel(update, context)
+        return
+
+    # Etapa 3: Seleção de Nível
+    if cb.startswith("set_nivel_"):
+        data["nivel"] = cb.replace("set_nivel_", "")
+        data["step"] = "pronto"
+        await enviar_menu_principal(update, context)
+        return
+
+    # Alterar Modo de Estudo
+    if cb.startswith("set_modo_"):
+        modo_limpo = cb.replace("set_modo_", "")
+        data["modo"] = modo_limpo
+        await query.edit_message_text(f"✅ Modo alterado para **{modo_limpo.capitalize()}**!\n\nPode enviar uma mensagem de texto ou áudio para começarmos.", parse_mode="Markdown")
+        return
+
+    # Reiniciar Configurações
+    if cb == "reset_config":
+        data["idioma"] = None
+        data["publico"] = None
+        data["nivel"] = None
+        await enviar_passo_idioma(update, context)
+        return
+
+    # Submenu de Vozes
+    if cb == "menu_voz":
+        keyboard = [
+            [InlineKeyboardButton("👩 Feminina", callback_data="set_voz_fem")],
+            [InlineKeyboardButton("👨 Masculina", callback_data="set_voz_masc")],
+            [InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="voltar_menu")]
+        ]
+        await query.edit_message_text("Escolha o tipo de voz para o seu tutor:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    if cb == "set_voz_fem":
         voices = {"Inglês": "en-US-AriaNeural", "Espanhol": "es-ES-ElviraNeural", "Francês": "fr-FR-DeniseNeural", "Italiano": "it-IT-ElsaNeural"}
         data["voz"] = voices.get(data["idioma"], "en-US-AriaNeural")
-    elif cb == "set_voz_masc":
+        await enviar_menu_principal(update, context)
+        return
+
+    if cb == "set_voz_masc":
         voices = {"Inglês": "en-US-GuyNeural", "Espanhol": "es-ES-AlvaroNeural", "Francês": "fr-FR-HenriNeural", "Italiano": "it-IT-DiegoNeural"}
         data["voz"] = voices.get(data["idioma"], "en-US-GuyNeural")
+        await enviar_menu_principal(update, context)
+        return
 
-    await start(update, context)
+    if cb == "voltar_menu":
+        await enviar_menu_principal(update, context)
+        return
 
-# --- PROCESSAMENTO DE MENSAGENS E ÁUDIOS ---
+# --- PROCESSAMENTO DE MENSAGENS E ÁUDIOS (GEMINI) ---
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = get_user_data(user_id)
     
+    # Se o utilizador ainda não completou a configuração, solicita a conclusão
+    if not data["idioma"] or not data["publico"] or not data["nivel"]:
+        await start(update, context)
+        return
+
     contents = []
 
     if update.message.voice or update.message.audio:
@@ -174,7 +238,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             new_file = await context.bot.get_file(file_id)
             audio_bytes = await new_file.download_as_bytearray()
             
-            # Formato esperado pela biblioteca google-generativeai
             contents.append({
                 "mime_type": "audio/ogg",
                 "data": bytes(audio_bytes)
@@ -215,19 +278,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Se for enviado áudio, transcreva o que entendeu, avalie a clareza e passe uma nova frase no idioma para ele repetir."
         )
 
-    try:
-        # Modelo oficial estável do Gemini
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            system_instruction=system_prompt
-        )
-        
-        response = model.generate_content(contents)
-        resposta_ia = response.text
+    # Chamada resiliente aos modelos disponíveis do Gemini para evitar erros de 404
+    resposta_ia = None
+    modelos_para_testar = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
 
+    for nome_modelo in modelos_para_testar:
+        try:
+            model = genai.GenerativeModel(
+                model_name=nome_modelo,
+                system_instruction=system_prompt
+            )
+            response = model.generate_content(contents)
+            resposta_ia = response.text
+            break  # Sucesso! Sai do loop
+        except Exception as e:
+            print(f"Tentativa com {nome_modelo} falhou: {e}", flush=True)
+
+    if not resposta_ia:
+        await update.message.reply_text("Não foi possível conectar ao Gemini. Verifique se a sua GEMINI_API_KEY está correta.")
+        return
+
+    try:
         await update.message.reply_text(resposta_ia)
 
-        # Geração de áudio com edge-tts (vozes neurais hiper-realistas e gratuitas)
+        # Geração de áudio com edge-tts
         communicate = edge_tts.Communicate(resposta_ia, data["voz"])
         speech_bytes = bytearray()
         
@@ -241,8 +315,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_voice(voice=speech_buffer)
 
     except Exception as e:
-        print(f"ERRO GEMINI/TTS: {e}", flush=True)
-        await update.message.reply_text(f"Ocorreu um erro no processamento: {e}")
+        print(f"ERRO NO TTS: {e}", flush=True)
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
