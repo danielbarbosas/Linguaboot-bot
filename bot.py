@@ -32,7 +32,7 @@ def run_bot():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.ALL, handle_message))
     print("Bot started - polling...")
-    application.run_polling()
+    application.run_polling(stop_signals=None, close_loop=False)
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
