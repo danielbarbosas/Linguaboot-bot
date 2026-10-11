@@ -24,28 +24,25 @@ async def start(update: Update, context):
 async def handle_message(update: Update, context):
     await update.message.reply_text("Recebi sua mensagem! Processando...")
 
-def run_bot():
-    print("Iniciando bot do Telegram...", flush=True)
-    if not BOT_TOKEN:
-        print("ERRO: BOT_TOKEN não encontrado!", flush=True)
-        return
-    
-    # FIX: Cria um novo loop pro thread
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.ALL, handle_message))
-    print("Bot started - polling...", flush=True)
-    application.run_polling(drop_pending_updates=True)
-
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     print(f"Iniciando Flask na porta {port}", flush=True)
-    app.run(host="0.0.0.0", port=port)
-
-threading.Thread(target=run_bot, daemon=True).start()
+    # use_reloader=False é fundamental para não duplicar threads no Flask
+    app.run(host="0.0.0.0", port=port, use_reloader=False)
 
 if __name__ == "__main__":
-    run_flask()
+    if not BOT_TOKEN:
+        print("ERRO: BOT_TOKEN não encontrado!", flush=True)
+        exit(1)
+
+    # Inicia o Flask em uma thread separada em segundo plano
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    # Executa o Bot na thread principal (onde os sinais e o event loop funcionam perfeitamente)
+    print("Iniciando bot do Telegram...", flush=True)
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.ALL, handle_message))
+    
+    print("Bot rodando - polling...", flush=True)
+    application.run_polling(drop_pending_updates=True)
