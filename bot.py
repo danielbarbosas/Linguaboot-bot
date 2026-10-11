@@ -40,68 +40,62 @@ def get_user_data(user_id):
 
 @app.route('/')
 def home():
-    return "LinguaBoot Bot (Gemini) Online 24h!"
-
-# --- MENUS E FLUXO ---
+    return "LinguaBoot Bot Online 24h!"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = get_user_data(user_id)
     
     if not data["idioma"]:
-        data["step"] = "idioma"
         await enviar_passo_idioma(update, context)
     elif not data["publico"]:
-        data["step"] = "publico"
         await enviar_passo_publico(update, context)
     elif not data["nivel"]:
-        data["step"] = "nivel"
         await enviar_passo_nivel(update, context)
     else:
-        data["step"] = "pronto"
         await enviar_menu_principal(update, context)
 
 async def enviar_passo_idioma(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    mensagem = "👋 Olá! Bem-vindo ao **LinguaBoot** 🤖📚\n\n**Passo 1/3:** Qual idioma você deseja praticar?"
-    keyboard = [
+    msg = "👋 Olá! Bem-vindo ao LinguaBoot 🤖📚\n\n**Passo 1/3:** Qual idioma você deseja praticar?"
+    kb = [
         [InlineKeyboardButton("🇺🇸 Inglês", callback_data="set_idioma_Inglês"), InlineKeyboardButton("🇪🇸 Espanhol", callback_data="set_idioma_Espanhol")],
         [InlineKeyboardButton("🇫🇷 Francês", callback_data="set_idioma_Francês"), InlineKeyboardButton("🇮🇹 Italiano", callback_data="set_idioma_Italiano")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
+    markup = InlineKeyboardMarkup(kb)
     if update.message:
-        await update.message.reply_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
     elif update.callback_query:
-        await update.callback_query.message.edit_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+        try:
+            await update.callback_query.message.edit_text(msg, parse_mode="Markdown", reply_markup=markup)
+        except Exception:
+            pass
 
 async def enviar_passo_publico(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
     data = get_user_data(user_id)
-    
-    mensagem = f"✅ Idioma: **{data['idioma']}**\n\n**Passo 2/3:** Qual é o perfil de aprendizado?"
-    keyboard = [
+    msg = f"✅ Idioma: **{data['idioma']}**\n\n**Passo 2/3:** Qual é o perfil de aprendizado?"
+    kb = [
         [InlineKeyboardButton("👤 Adulto", callback_data="set_publico_Adulto")],
         [InlineKeyboardButton("👧 Modo Kids (Crianças)", callback_data="set_publico_Kids")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if update.callback_query:
-        await update.callback_query.message.edit_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+    try:
+        await update.callback_query.message.edit_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+    except Exception:
+        pass
 
 async def enviar_passo_nivel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
     data = get_user_data(user_id)
-    
-    mensagem = f"✅ Idioma: **{data['idioma']}**\n✅ Público: **{data['publico']}**\n\n**Passo 3/3:** Escolha o seu nível de conhecimento:"
-    keyboard = [
+    msg = f"✅ Idioma: **{data['idioma']}**\n✅ Público: **{data['publico']}**\n\n**Passo 3/3:** Escolha o seu nível de conhecimento:"
+    kb = [
         [InlineKeyboardButton("Iniciante (A1-A2)", callback_data="set_nivel_Iniciante")],
         [InlineKeyboardButton("Intermediário (B1-B2)", callback_data="set_nivel_Intermediário")],
         [InlineKeyboardButton("Avançado (C1-C2)", callback_data="set_nivel_Avançado")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if update.callback_query:
-        await update.callback_query.message.edit_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+    try:
+        await update.callback_query.message.edit_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+    except Exception:
+        pass
 
 async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
@@ -110,20 +104,19 @@ async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TY
     idioma = data['idioma'] or "Inglês"
     publico = data['publico'] or "Adulto"
     nivel = data['nivel'] or "Iniciante"
-    
     tipo_voz = "Masculina" if any(v in data['voz'] for v in ['Guy', 'Alvaro', 'Henri', 'Diego']) else "Feminina"
     
-    mensagem = (
+    msg = (
         f"🎯 **Perfil Configurado com Sucesso!**\n\n"
         f"• **Idioma:** {idioma}\n"
         f"• **Público:** {publico}\n"
         f"• **Nível:** {nivel}\n"
         f"• **Voz:** {tipo_voz}\n"
         f"• **Modo Ativo:** {data['modo'].capitalize()}\n\n"
-        f"Escolha um modo abaixo para praticar ou altere suas opções:"
+        f"Escolha um modo de estudo abaixo para praticar:"
     )
 
-    keyboard = [
+    kb = [
         [InlineKeyboardButton("🗣️ Modo Conversa Livre", callback_data="set_modo_conversa")],
         [
             InlineKeyboardButton("✍️ Teste Escrito", callback_data="set_modo_teste_escrita"),
@@ -135,32 +128,27 @@ async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TY
         ]
     ]
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
+    markup = InlineKeyboardMarkup(kb)
     try:
         if update.message:
-            await update.message.reply_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+            await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
         elif update.callback_query:
-            await update.callback_query.message.edit_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+            await update.callback_query.message.edit_text(msg, parse_mode="Markdown", reply_markup=markup)
     except Exception as e:
-        print(f"Aviso de edição no menu: {e}", flush=True)
-
-# --- CALLBACKS ---
+        print(f"Edição de menu ignorada (conteúdo idêntico): {e}", flush=True)
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
     user_id = query.from_user.id
     data = get_user_data(user_id)
-    
     cb = query.data
 
     if cb.startswith("set_idioma_"):
         data["idioma"] = cb.replace("set_idioma_", "")
-        
         voices = {"Inglês": "en-US-AriaNeural", "Espanhol": "es-ES-ElviraNeural", "Francês": "fr-FR-DeniseNeural", "Italiano": "it-IT-ElsaNeural"}
         data["voz"] = voices.get(data["idioma"], "en-US-AriaNeural")
-
         await enviar_passo_publico(update, context)
         return
 
@@ -179,13 +167,23 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         modo_limpo = cb.replace("set_modo_", "")
         data["modo"] = modo_limpo
         
-        mensagem = (
-            f"✅ Modo alterado para **{modo_limpo.capitalize()}**!\n\n"
-            f"Pode me mandar uma mensagem de texto ou gravar um áudio para começarmos a praticar agora mesmo!"
-        )
-        keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="voltar_menu")]]
+        nomes_modos = {
+            "conversa": "Conversa Livre 🗣️",
+            "teste_escrita": "Teste Escrito ✍️",
+            "teste_pronuncia": "Teste de Pronúncia 🎙️"
+        }
+        nome_exibicao = nomes_modos.get(modo_limpo, modo_limpo.capitalize())
         
-        await query.edit_message_text(mensagem, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        msg = (
+            f"✅ **Modo ativo:** {nome_exibicao}\n\n"
+            f"Já pode mandar uma mensagem de texto ou gravar um áudio no idioma **{data['idioma'] or 'Inglês'}** para começar a praticar!"
+        )
+        kb = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="voltar_menu")]]
+        
+        try:
+            await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        except Exception:
+            pass
         return
 
     if cb == "reset_config":
@@ -196,33 +194,38 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if cb == "menu_voz":
-        keyboard = [
+        kb = [
             [InlineKeyboardButton("👩 Feminina", callback_data="set_voz_fem")],
             [InlineKeyboardButton("👨 Masculina", callback_data="set_voz_masc")],
             [InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="voltar_menu")]
         ]
-        await query.edit_message_text("Escolha o tipo de voz para o seu tutor:", reply_markup=InlineKeyboardMarkup(keyboard))
+        try:
+            await query.edit_message_text("Escolha o tipo de voz do seu tutor:", reply_markup=InlineKeyboardMarkup(kb))
+        except Exception:
+            pass
         return
 
-    if cb == "set_voz_fem":
+    if cb in ["set_voz_fem", "set_voz_masc"]:
         idioma_atual = data["idioma"] or "Inglês"
-        voices = {"Inglês": "en-US-AriaNeural", "Espanhol": "es-ES-ElviraNeural", "Francês": "fr-FR-DeniseNeural", "Italiano": "it-IT-ElsaNeural"}
+        if cb == "set_voz_fem":
+            voices = {"Inglês": "en-US-AriaNeural", "Espanhol": "es-ES-ElviraNeural", "Francês": "fr-FR-DeniseNeural", "Italiano": "it-IT-ElsaNeural"}
+        else:
+            voices = {"Inglês": "en-US-GuyNeural", "Espanhol": "es-ES-AlvaroNeural", "Francês": "fr-FR-HenriNeural", "Italiano": "it-IT-DiegoNeural"}
+            
         data["voz"] = voices.get(idioma_atual, "en-US-AriaNeural")
-        await enviar_menu_principal(update, context)
-        return
-
-    if cb == "set_voz_masc":
-        idioma_atual = data["idioma"] or "Inglês"
-        voices = {"Inglês": "en-US-GuyNeural", "Espanhol": "es-ES-AlvaroNeural", "Francês": "fr-FR-HenriNeural", "Italiano": "it-IT-DiegoNeural"}
-        data["voz"] = voices.get(idioma_atual, "en-US-GuyNeural")
-        await enviar_menu_principal(update, context)
+        
+        # Confirmação visual da alteração da voz
+        msg_confirmacao = f"✅ Voz alterada para **{'Feminina' if cb == 'set_voz_fem' else 'Masculina'}** com sucesso!"
+        kb = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="voltar_menu")]]
+        try:
+            await query.edit_message_text(msg_confirmacao, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        except Exception:
+            await enviar_menu_principal(update, context)
         return
 
     if cb == "voltar_menu":
         await enviar_menu_principal(update, context)
         return
-
-# --- MENSAGENS E ÁUDIOS (GEMINI + EDGE-TTS) ---
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -236,7 +239,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.message.voice or update.message.audio:
         await update.message.reply_text("🎙️ Ouvindo seu áudio...")
-        
         try:
             file_id = (update.message.voice or update.message.audio).file_id
             new_file = await context.bot.get_file(file_id)
@@ -246,9 +248,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "mime_type": "audio/ogg",
                 "data": bytes(audio_bytes)
             })
-            contents.append("Transcreva exatamente o áudio enviado pelo aluno e responda em seguida mantendo o papel de professor de idiomas.")
+            contents.append("Transcreva o áudio enviado pelo aluno e responda em seguida mantendo o papel de professor de idiomas.")
         except Exception as e:
-            print(f"ERRO AO PROCESSAR ÁUDIO: {e}", flush=True)
+            print(f"ERRO AUDIO: {e}", flush=True)
             await update.message.reply_text("Erro ao carregar o áudio. Tente novamente!")
             return
     else:
@@ -263,42 +265,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if data["publico"] == "Kids":
-        system_prompt += "Mantenha o tom extremamente lúdico, amigável, divertido, use bastantes emojis e frases curtas e simples adequadas para crianças.\n"
+        system_prompt += "Mantenha o tom extremamente lúdico, amigável e simples para crianças.\n"
     
     if data["modo"] == "conversa":
-        system_prompt += (
-            f"Converse naturalmente sobre qualquer assunto no idioma {data['idioma']}. "
-            "Ao final da sua resposta, se o aluno cometeu algum erro de gramática ou vocabulário, "
-            "adicione uma seção '💡 Dica do Professor:' corrigindo com gentileza em português."
-        )
+        system_prompt += f"Converse naturalmente sobre qualquer assunto no idioma {data['idioma']}. Ao final, adicione '💡 Dica do Professor:' com correções gentis em português."
     elif data["modo"] == "teste_escrita":
-        system_prompt += (
-            f"Você está aplicando um teste de escrita em {data['idioma']}. Avalie o texto do aluno, "
-            "dê uma nota de 0 a 10, explique onde ele errou e envie uma nova pergunta para continuar o teste."
-        )
+        system_prompt += f"Aplique um teste de escrita em {data['idioma']}. Avalie o texto (nota 0 a 10) e envie nova pergunta."
     elif data["modo"] == "teste_pronuncia":
-        system_prompt += (
-            f"Você está avaliando a pronúncia/estrutura do áudio do aluno em {data['idioma']}. "
-            "Se for enviado áudio, transcreva o que entendeu, avalie a clareza e passe uma nova frase no idioma para ele repetir."
-        )
+        system_prompt += f"Avalie a pronúncia do áudio em {data['idioma']}. Transcreva o que entendeu e passe uma nova frase para repetir."
 
     resposta_ia = None
-    modelos_para_testar = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
+    modelos = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
 
-    for nome_modelo in modelos_para_testar:
+    for m in modelos:
         try:
-            model = genai.GenerativeModel(
-                model_name=nome_modelo,
-                system_instruction=system_prompt
-            )
+            model = genai.GenerativeModel(model_name=m, system_instruction=system_prompt)
             response = model.generate_content(contents)
             resposta_ia = response.text
             break
         except Exception as e:
-            print(f"Tentativa com {nome_modelo} falhou: {e}", flush=True)
+            print(f"Erro no modelo {m}: {e}", flush=True)
 
     if not resposta_ia:
-        await update.message.reply_text("Não foi possível conectar ao Gemini. Verifique se sua GEMINI_API_KEY está válida no Render.")
+        await update.message.reply_text("Erro na API do Gemini. Verifique se a chave GEMINI_API_KEY está correta no Render.")
         return
 
     try:
@@ -313,11 +302,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         speech_buffer = io.BytesIO(speech_bytes)
         speech_buffer.name = "response.mp3"
-
         await update.message.reply_voice(voice=speech_buffer)
 
     except Exception as e:
-        print(f"ERRO NO TTS: {e}", flush=True)
+        print(f"ERRO TTS: {e}", flush=True)
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -325,16 +313,15 @@ def run_flask():
 
 if __name__ == "__main__":
     if not BOT_TOKEN:
-        print("ERRO: BOT_TOKEN não encontrado!", flush=True)
+        print("ERRO: BOT_TOKEN ausente!", flush=True)
         exit(1)
 
     threading.Thread(target=run_flask, daemon=True).start()
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
-    
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.ALL, handle_message))
 
-    print("LinguaBoot (Gemini + EdgeTTS) rodando com sucesso!", flush=True)
+    print("LinguaBoot rodando com sucesso!", flush=True)
     application.run_polling(drop_pending_updates=True)
