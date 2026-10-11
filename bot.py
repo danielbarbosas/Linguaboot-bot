@@ -107,18 +107,20 @@ async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TY
     user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
     data = get_user_data(user_id)
     
-    # Garantia de valores padrão para evitar travamentos
     idioma = data['idioma'] or "Inglês"
     publico = data['publico'] or "Adulto"
     nivel = data['nivel'] or "Iniciante"
     
+    tipo_voz = "Masculina" if any(v in data['voz'] for v in ['Guy', 'Alvaro', 'Henri', 'Diego']) else "Feminina"
+    
     mensagem = (
-        f"🎯 **Tudo pronto! Seu perfil foi configurado:**\n\n"
+        f"🎯 **Perfil Configurado com Sucesso!**\n\n"
         f"• **Idioma:** {idioma}\n"
         f"• **Público:** {publico}\n"
         f"• **Nível:** {nivel}\n"
+        f"• **Voz:** {tipo_voz}\n"
         f"• **Modo Ativo:** {data['modo'].capitalize()}\n\n"
-        f"Escolha um modo de estudo para começar ou reconfigure seu perfil:"
+        f"Escolha um modo abaixo para praticar ou altere suas opções:"
     )
 
     keyboard = [
@@ -135,10 +137,13 @@ async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TY
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    if update.message:
-        await update.message.reply_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
-    elif update.callback_query:
-        await update.callback_query.message.edit_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+    try:
+        if update.message:
+            await update.message.reply_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+        elif update.callback_query:
+            await update.callback_query.message.edit_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
+    except Exception as e:
+        print(f"Aviso de edição no menu: {e}", flush=True)
 
 # --- CALLBACKS ---
 
@@ -173,11 +178,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if cb.startswith("set_modo_"):
         modo_limpo = cb.replace("set_modo_", "")
         data["modo"] = modo_limpo
-        await query.edit_message_text(
+        
+        mensagem = (
             f"✅ Modo alterado para **{modo_limpo.capitalize()}**!\n\n"
-            f"Pode enviar uma mensagem de texto ou gravar um áudio para praticar.",
-            parse_mode="Markdown"
+            f"Pode me mandar uma mensagem de texto ou gravar um áudio para começarmos a praticar agora mesmo!"
         )
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="voltar_menu")]]
+        
+        await query.edit_message_text(mensagem, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     if cb == "reset_config":
@@ -220,7 +228,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = get_user_data(user_id)
     
-    # Se ainda não configurou idioma/público/nível, força o início do passo a passo
     if not data["idioma"] or not data["publico"] or not data["nivel"]:
         await start(update, context)
         return
@@ -297,7 +304,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.reply_text(resposta_ia)
 
-        # Geração do áudio com EdgeTTS
         communicate = edge_tts.Communicate(resposta_ia, data["voz"])
         speech_bytes = bytearray()
         
