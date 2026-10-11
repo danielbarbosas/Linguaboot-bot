@@ -1,4 +1,5 @@
 import os
+import asyncio
 import threading
 from flask import Flask
 from telegram import Update
@@ -28,18 +29,22 @@ def run_bot():
     if not BOT_TOKEN:
         print("ERRO: BOT_TOKEN não encontrado!", flush=True)
         return
+    
+    # FIX: Cria um novo loop pro thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.ALL, handle_message))
     print("Bot started - polling...", flush=True)
-    application.run_polling(stop_signals=None, close_loop=False, drop_pending_updates=True)
+    application.run_polling(drop_pending_updates=True)
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     print(f"Iniciando Flask na porta {port}", flush=True)
     app.run(host="0.0.0.0", port=port)
 
-# FIX RENDER: Inicia o bot fora do __main__ pra funcionar com gunicorn
 threading.Thread(target=run_bot, daemon=True).start()
 
 if __name__ == "__main__":
