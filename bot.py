@@ -28,7 +28,7 @@ user_sessions = {}
 def get_user_data(user_id):
     if user_id not in user_sessions:
         user_sessions[user_id] = {
-            "step": "idioma",  # Etapas do fluxo: idioma -> publico -> nivel -> pronto
+            "step": "idioma",
             "idioma": None,
             "publico": None,
             "nivel": None,
@@ -42,13 +42,12 @@ def get_user_data(user_id):
 def home():
     return "LinguaBoot Bot (Gemini) Online 24h!"
 
-# --- FLUXO DE PASSO A PASSO (ONBOARDING) E MENUS ---
+# --- MENUS E FLUXO ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = get_user_data(user_id)
     
-    # Se ainda não completou as configurações iniciais, inicia o passo a passo
     if not data["idioma"]:
         data["step"] = "idioma"
         await enviar_passo_idioma(update, context)
@@ -108,13 +107,18 @@ async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TY
     user_id = update.effective_user.id if update.effective_user else update.callback_query.from_user.id
     data = get_user_data(user_id)
     
+    # Garantia de valores padrão para evitar travamentos
+    idioma = data['idioma'] or "Inglês"
+    publico = data['publico'] or "Adulto"
+    nivel = data['nivel'] or "Iniciante"
+    
     mensagem = (
         f"🎯 **Tudo pronto! Seu perfil foi configurado:**\n\n"
-        f"• **Idioma:** {data['idioma']}\n"
-        f"• **Público:** {data['publico']}\n"
-        f"• **Nível:** {data['nivel']}\n"
+        f"• **Idioma:** {idioma}\n"
+        f"• **Público:** {publico}\n"
+        f"• **Nível:** {nivel}\n"
         f"• **Modo Ativo:** {data['modo'].capitalize()}\n\n"
-        f"Escolha um modo de estudo para começar ou reconfigure o perfil:"
+        f"Escolha um modo de estudo para começar ou reconfigure seu perfil:"
     )
 
     keyboard = [
@@ -124,7 +128,7 @@ async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TY
             InlineKeyboardButton("🎙️ Teste Pronúncia", callback_data="set_modo_teste_pronuncia")
         ],
         [
-            InlineKeyboardButton("🎙️ Alterar Voz (M/F)", callback_data="menu_voz"),
+            InlineKeyboardButton("🎙️ Tipo de Voz (M/F)", callback_data="menu_voz"),
             InlineKeyboardButton("⚙️ Refazer Configuração", callback_data="reset_config")
         ]
     ]
@@ -136,7 +140,7 @@ async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TY
     elif update.callback_query:
         await update.callback_query.message.edit_text(mensagem, parse_mode="Markdown", reply_markup=reply_markup)
 
-# --- HANDLER DOS BOTÕES ---
+# --- CALLBACKS ---
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -146,44 +150,36 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     cb = query.data
 
-    # Etapa 1: Seleção de Idioma
     if cb.startswith("set_idioma_"):
         data["idioma"] = cb.replace("set_idioma_", "")
         
-        # Define voz padrão por idioma
-        if data["idioma"] == "Inglês":
-            data["voz"] = "en-US-AriaNeural"
-        elif data["idioma"] == "Espanhol":
-            data["voz"] = "es-ES-ElviraNeural"
-        elif data["idioma"] == "Francês":
-            data["voz"] = "fr-FR-DeniseNeural"
-        elif data["idioma"] == "Italiano":
-            data["voz"] = "it-IT-ElsaNeural"
+        voices = {"Inglês": "en-US-AriaNeural", "Espanhol": "es-ES-ElviraNeural", "Francês": "fr-FR-DeniseNeural", "Italiano": "it-IT-ElsaNeural"}
+        data["voz"] = voices.get(data["idioma"], "en-US-AriaNeural")
 
         await enviar_passo_publico(update, context)
         return
 
-    # Etapa 2: Seleção de Público
     if cb.startswith("set_publico_"):
         data["publico"] = cb.replace("set_publico_", "")
         await enviar_passo_nivel(update, context)
         return
 
-    # Etapa 3: Seleção de Nível
     if cb.startswith("set_nivel_"):
         data["nivel"] = cb.replace("set_nivel_", "")
         data["step"] = "pronto"
         await enviar_menu_principal(update, context)
         return
 
-    # Alterar Modo de Estudo
     if cb.startswith("set_modo_"):
         modo_limpo = cb.replace("set_modo_", "")
         data["modo"] = modo_limpo
-        await query.edit_message_text(f"✅ Modo alterado para **{modo_limpo.capitalize()}**!\n\nPode enviar uma mensagem de texto ou áudio para começarmos.", parse_mode="Markdown")
+        await query.edit_message_text(
+            f"✅ Modo alterado para **{modo_limpo.capitalize()}**!\n\n"
+            f"Pode enviar uma mensagem de texto ou gravar um áudio para praticar.",
+            parse_mode="Markdown"
+        )
         return
 
-    # Reiniciar Configurações
     if cb == "reset_config":
         data["idioma"] = None
         data["publico"] = None
@@ -191,7 +187,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await enviar_passo_idioma(update, context)
         return
 
-    # Submenu de Vozes
     if cb == "menu_voz":
         keyboard = [
             [InlineKeyboardButton("👩 Feminina", callback_data="set_voz_fem")],
@@ -202,14 +197,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if cb == "set_voz_fem":
+        idioma_atual = data["idioma"] or "Inglês"
         voices = {"Inglês": "en-US-AriaNeural", "Espanhol": "es-ES-ElviraNeural", "Francês": "fr-FR-DeniseNeural", "Italiano": "it-IT-ElsaNeural"}
-        data["voz"] = voices.get(data["idioma"], "en-US-AriaNeural")
+        data["voz"] = voices.get(idioma_atual, "en-US-AriaNeural")
         await enviar_menu_principal(update, context)
         return
 
     if cb == "set_voz_masc":
+        idioma_atual = data["idioma"] or "Inglês"
         voices = {"Inglês": "en-US-GuyNeural", "Espanhol": "es-ES-AlvaroNeural", "Francês": "fr-FR-HenriNeural", "Italiano": "it-IT-DiegoNeural"}
-        data["voz"] = voices.get(data["idioma"], "en-US-GuyNeural")
+        data["voz"] = voices.get(idioma_atual, "en-US-GuyNeural")
         await enviar_menu_principal(update, context)
         return
 
@@ -217,13 +214,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await enviar_menu_principal(update, context)
         return
 
-# --- PROCESSAMENTO DE MENSAGENS E ÁUDIOS (GEMINI) ---
+# --- MENSAGENS E ÁUDIOS (GEMINI + EDGE-TTS) ---
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = get_user_data(user_id)
     
-    # Se o utilizador ainda não completou a configuração, solicita a conclusão
+    # Se ainda não configurou idioma/público/nível, força o início do passo a passo
     if not data["idioma"] or not data["publico"] or not data["nivel"]:
         await start(update, context)
         return
@@ -278,7 +275,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Se for enviado áudio, transcreva o que entendeu, avalie a clareza e passe uma nova frase no idioma para ele repetir."
         )
 
-    # Chamada resiliente aos modelos disponíveis do Gemini para evitar erros de 404
     resposta_ia = None
     modelos_para_testar = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
 
@@ -290,18 +286,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             response = model.generate_content(contents)
             resposta_ia = response.text
-            break  # Sucesso! Sai do loop
+            break
         except Exception as e:
             print(f"Tentativa com {nome_modelo} falhou: {e}", flush=True)
 
     if not resposta_ia:
-        await update.message.reply_text("Não foi possível conectar ao Gemini. Verifique se a sua GEMINI_API_KEY está correta.")
+        await update.message.reply_text("Não foi possível conectar ao Gemini. Verifique se sua GEMINI_API_KEY está válida no Render.")
         return
 
     try:
         await update.message.reply_text(resposta_ia)
 
-        # Geração de áudio com edge-tts
+        # Geração do áudio com EdgeTTS
         communicate = edge_tts.Communicate(resposta_ia, data["voz"])
         speech_bytes = bytearray()
         
