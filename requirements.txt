@@ -1,5 +1,5 @@
 python-telegram-bot[job-queue]==20.7
-openai==1.12.0
+openai>=1.12.0
 flask
 python-dotenv
 httpx
