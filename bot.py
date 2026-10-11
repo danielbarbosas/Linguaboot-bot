@@ -1,4 +1,3 @@
-
 import os
 import io
 import asyncio
@@ -13,15 +12,14 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from google import genai
-from google.genai import types
-from gtts import gTTS
+import google.generativeai as genai
+import edge_tts
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Inicializa o cliente do Gemini
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 app = Flask(__name__)
 
@@ -33,6 +31,7 @@ def get_user_data(user_id):
             "idioma": "Inglês",
             "nivel": "Iniciante",
             "publico": "Adulto",
+            "voz": "en-US-AriaNeural",
             "modo": "conversa",
             "historico": []
         }
@@ -40,7 +39,7 @@ def get_user_data(user_id):
 
 @app.route('/')
 def home():
-    return "LinguaBoot Bot (Gemini Version) Online 24h!"
+    return "LinguaBoot Bot Online 24h!"
 
 # --- MENU INTERATIVO ---
 
@@ -50,11 +49,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     mensagem = (
         f"Olá! Eu sou o LinguaBoot 🤖📚\n\n"
-        f"Seu tutor de idiomas interativo (Movido a Gemini 🤖)!\n\n"
+        f"Seu tutor de idiomas interativo (100% Gratuito)!\n\n"
         f"⚙️ Sua Configuração Atual:\n"
         f"• Público: {data['publico']}\n"
         f"• Idioma: {data['idioma']}\n"
         f"• Nível: {data['nivel']}\n"
+        f"• Voz: {'Feminina' if 'Aria' in data['voz'] or 'Elvira' in data['voz'] or 'Denise' in data['voz'] or 'Elsa' in data['voz'] else 'Masculina'}\n"
         f"• Modo: {data['modo'].capitalize()}\n\n"
         f"Escolha uma opção abaixo para ajustar o bot ou começar a praticar!"
     )
@@ -70,7 +70,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("📊 Nível", callback_data="menu_nivel")
         ],
         [
-            InlineKeyboardButton("👨‍👩‍👧 Público (Kids/Adulto)", callback_data="menu_publico")
+            InlineKeyboardButton("👨‍👩‍👧 Público (Kids/Adulto)", callback_data="menu_publico"),
+            InlineKeyboardButton("🎙️ Tipo de Voz", callback_data="menu_voz")
         ]
     ]
 
@@ -123,39 +124,68 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Selecione o perfil de aprendizado:", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
+    if cb == "menu_voz":
+        keyboard = [
+            [InlineKeyboardButton("👩 Feminina", callback_data="set_voz_fem")],
+            [InlineKeyboardButton("👨 Masculina", callback_data="set_voz_masc")],
+            [InlineKeyboardButton("⬅️ Voltar", callback_data="voltar_menu")]
+        ]
+        await query.edit_message_text("Escolha a voz do seu tutor:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
     if cb.startswith("set_idioma_"):
         data["idioma"] = cb.replace("set_idioma_", "")
+        # Ajusta voz padrão para o idioma selecionado
+        if data["idioma"] == "Inglês":
+            data["voz"] = "en-US-AriaNeural"
+        elif data["idioma"] == "Espanhol":
+            data["voz"] = "es-ES-ElviraNeural"
+        elif data["idioma"] == "Francês":
+            data["voz"] = "fr-FR-DeniseNeural"
+        elif data["idioma"] == "Italiano":
+            data["voz"] = "it-IT-ElsaNeural"
+
     elif cb.startswith("set_nivel_"):
         data["nivel"] = cb.replace("set_nivel_", "")
     elif cb.startswith("set_publico_"):
         data["publico"] = cb.replace("set_publico_", "")
+    elif cb == "set_voz_fem":
+        voices = {"Inglês": "en-US-AriaNeural", "Espanhol": "es-ES-ElviraNeural", "Francês": "fr-FR-DeniseNeural", "Italiano": "it-IT-ElsaNeural"}
+        data["voz"] = voices.get(data["idioma"], "en-US-AriaNeural")
+    elif cb == "set_voz_masc":
+        voices = {"Inglês": "en-US-GuyNeural", "Espanhol": "es-ES-AlvaroNeural", "Francês": "fr-FR-HenriNeural", "Italiano": "it-IT-DiegoNeural"}
+        data["voz"] = voices.get(data["idioma"], "en-US-GuyNeural")
 
     await start(update, context)
 
-# --- PROCESSAMENTO DE MENSAGENS E ÁUDIOS (GEMINI) ---
+# --- PROCESSAMENTO DE MENSAGENS E ÁUDIOS ---
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = get_user_data(user_id)
     
-    prompt_usuario = ""
-    audio_bytes_data = None
+    contents = []
 
     if update.message.voice or update.message.audio:
-        await update.message.reply_text("🎙️ Ouvindo e processando seu áudio...")
+        await update.message.reply_text("🎙️ Ouvindo seu áudio...")
         
         try:
             file_id = (update.message.voice or update.message.audio).file_id
             new_file = await context.bot.get_file(file_id)
-            audio_bytes_data = await new_file.download_as_bytearray()
+            audio_bytes = await new_file.download_as_bytearray()
             
-            prompt_usuario = "Transcreva este áudio e responda ao que foi dito seguindo as instruções de tutor."
+            # Formato esperado pela biblioteca google-generativeai
+            contents.append({
+                "mime_type": "audio/ogg",
+                "data": bytes(audio_bytes)
+            })
+            contents.append("Transcreva exatamente o áudio enviado pelo aluno e responda em seguida mantendo o papel de professor de idiomas.")
         except Exception as e:
-            print(f"ERRO AO BAIXAR ÁUDIO: {e}", flush=True)
-            await update.message.reply_text("Ocorreu um erro ao baixar o áudio. Tente novamente!")
+            print(f"ERRO AO PROCESSAR ÁUDIO: {e}", flush=True)
+            await update.message.reply_text("Erro ao carregar o áudio. Tente novamente!")
             return
     else:
-        prompt_usuario = update.message.text
+        contents.append(update.message.text)
 
     system_prompt = (
         f"Você é o LinguaBoot, um tutor de idiomas especialista.\n"
@@ -166,7 +196,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if data["publico"] == "Kids":
-        system_prompt += "Mantenha o tom extremamente lúdico, amigável, divertido, use bastantes emojis e frases curtas e simples adequadas para crianças. Restrição total a temas adultos ou complexos.\n"
+        system_prompt += "Mantenha o tom extremamente lúdico, amigável, divertido, use bastantes emojis e frases curtas e simples adequadas para crianças.\n"
     
     if data["modo"] == "conversa":
         system_prompt += (
@@ -182,57 +212,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data["modo"] == "teste_pronuncia":
         system_prompt += (
             f"Você está avaliando a pronúncia/estrutura do áudio do aluno em {data['idioma']}. "
-            "Se for enviado áudio, transcreva primeiro o que entendeu, avalie a clareza, aponte palavras a melhorar e passe uma nova frase no idioma para ele repetir."
+            "Se for enviado áudio, transcreva o que entendeu, avalie a clareza e passe uma nova frase no idioma para ele repetir."
         )
-
-    contents = []
-    
-    # Se enviou áudio, adiciona os bytes diretamente para o Gemini analisar
-    if audio_bytes_data:
-        contents.append(
-            types.Part.from_bytes(
-                data=bytes(audio_bytes_data),
-                mime_type="audio/ogg"
-            )
-        )
-
-    contents.append(prompt_usuario)
 
     try:
-        # Chamada à API do Gemini
-        response = client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.7,
-            )
+        # Modelo oficial estável do Gemini
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction=system_prompt
         )
+        
+        response = model.generate_content(contents)
         resposta_ia = response.text
 
         await update.message.reply_text(resposta_ia)
 
-        # Mapeamento simples de idioma para gTTS
-        lang_code = "en"
-        if data["idioma"] == "Espanhol":
-            lang_code = "es"
-        elif data["idioma"] == "Francês":
-            lang_code = "fr"
-        elif data["idioma"] == "Italiano":
-            lang_code = "it"
+        # Geração de áudio com edge-tts (vozes neurais hiper-realistas e gratuitas)
+        communicate = edge_tts.Communicate(resposta_ia, data["voz"])
+        speech_bytes = bytearray()
+        
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                speech_bytes.extend(chunk["data"])
 
-        # Geração da resposta em voz com gTTS (Gratuito)
-        tts = gTTS(text=resposta_ia, lang=lang_code)
-        speech_buffer = io.BytesIO()
-        tts.write_to_fp(speech_buffer)
-        speech_buffer.seek(0)
+        speech_buffer = io.BytesIO(speech_bytes)
         speech_buffer.name = "response.mp3"
 
         await update.message.reply_voice(voice=speech_buffer)
 
     except Exception as e:
-        print(f"ERRO NA RESPOSTA DO GEMINI: {e}", flush=True)
-        await update.message.reply_text(f"Ocorreu um erro na IA: {e}")
+        print(f"ERRO GEMINI/TTS: {e}", flush=True)
+        await update.message.reply_text(f"Ocorreu um erro no processamento: {e}")
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -251,5 +261,5 @@ if __name__ == "__main__":
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.ALL, handle_message))
 
-    print("LinguaBoot (Gemini) rodando com sucesso!", flush=True)
+    print("LinguaBoot (Gemini + EdgeTTS) rodando com sucesso!", flush=True)
     application.run_polling(drop_pending_updates=True)
