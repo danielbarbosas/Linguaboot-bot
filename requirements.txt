@@ -1,6 +1,6 @@
 python-telegram-bot==20.7
-google-genai
-gTTS
+google-generativeai
+edge-tts
 flask
 python-dotenv
 httpx
