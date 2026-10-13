@@ -41,9 +41,8 @@ def get_user_data(user_id):
     return user_sessions[user_id]
 
 def limpar_texto_para_tts(texto):
-    # Remove marcas de Markdown (*, _, #, etc.) para não quebrar a sintese de voz
     texto_limpo = re.sub(r'[*_~`#]', '', texto)
-    return texto_limpo[:600]  # Limita o tamanho do texto para evitar timeout no envio de áudio
+    return texto_limpo[:600]
 
 @app.route('/')
 def home():
@@ -181,10 +180,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         nome_exibicao = nomes_modos.get(modo_limpo, modo_limpo.capitalize())
         
-        msg = (
-            f"✅ **Modo ativo:** {nome_exibicao}\n\n"
-            f"Já pode mandar uma mensagem de texto ou gravar um áudio no idioma **{data['idioma'] or 'Inglês'}** para começar a praticar!"
-        )
+        msg = f"✅ **Modo ativo:** {nome_exibicao}\n\nJá pode mandar uma mensagem de texto ou gravar um áudio no idioma **{data['idioma'] or 'Inglês'}** para começar a praticar!"
         kb = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="voltar_menu")]]
         
         try:
@@ -216,9 +212,140 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idioma_atual = data["idioma"] or "Inglês"
         if cb == "set_voz_fem":
             voices = {"Inglês": "en-US-AriaNeural", "Espanhol": "es-ES-ElviraNeural", "Francês": "fr-FR-DeniseNeural", "Italiano": "it-IT-ElsaNeural"}
+            genero = "Feminina"
         else:
             voices = {"Inglês": "en-US-GuyNeural", "Espanhol": "es-ES-AlvaroNeural", "Francês": "fr-FR-HenriNeural", "Italiano": "it-IT-DiegoNeural"}
+            genero = "Masculina"
             
         data["voz"] = voices.get(idioma_atual, "en-US-AriaNeural")
         
-        msg_confirmacao = f"✅ Voz alterada para
+        msg_confirmacao = f"✅ Voz alterada para **{genero}** com sucesso!"
+        kb = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="voltar_menu")]]
+        try:
+            await query.edit_message_text(msg_confirmacao, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        except Exception:
+            await enviar_menu_principal(update, context)
+        return
+
+    if cb == "voltar_menu":
+        await enviar_menu_principal(update, context)
+        return
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    data = get_user_data(user_id)
+    
+    if not data["idioma"] or not data["publico"] or not data["nivel"]:
+        await start(update, context)
+        return
+
+    contents = []
+    temp_audio_path = None
+
+    try:
+        if update.message.voice or update.message.audio:
+            await update.message.reply_text("🎙️ Ouvindo o seu áudio...")
+            file_id = (update.message.voice or update.message.audio).file_id
+            new_file = await context.bot.get_file(file_id)
+            audio_bytes = await new_file.download_as_bytearray()
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as temp_file:
+                temp_file.write(bytes(audio_bytes))
+                temp_audio_path = temp_file.name
+
+            loop = asyncio.get_running_loop()
+            audio_file = await loop.run_in_executor(None, genai.upload_file, temp_audio_path)
+            contents.append(audio_file)
+            contents.append("Transcreva exatamente o áudio enviado pelo aluno e responda em seguida mantendo o papel de professor de idiomas.")
+        else:
+            contents.append(update.message.text)
+
+        system_prompt = (
+            f"Você é o LinguaBoot, um tutor de idiomas especialista.\n"
+            f"• Idioma das aulas: {data['idioma']}\n"
+            f"• Nível do aluno: {data['nivel']}\n"
+            f"• Público: {data['publico']}\n"
+            f"• Modo atual: {data['modo']}\n\n"
+        )
+
+        if data["publico"] == "Kids":
+            system_prompt += "Mantenha o tom extremamente lúdico, amigável e simples para crianças.\n"
+        
+        if data["modo"] == "conversa":
+            system_prompt += f"Converse naturally sobre qualquer assunto no idioma {data['idioma']}. Ao final, adicione '💡 Dica do Professor:' com correções gentis em português."
+        elif data["modo"] == "teste_escrita":
+            system_prompt += f"Aplique um teste de escrita em {data['idioma']}. Avalie o texto (nota 0 a 10) e envie nova pergunta."
+        elif data["modo"] == "teste_pronuncia":
+            system_prompt += f"Avalie a pronúncia do áudio em {data['idioma']}. Transcreva o que entendeu e passe uma nova frase para repetir."
+
+        modelos = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
+        resposta_ia = None
+        ultimo_erro = ""
+
+        loop = asyncio.get_running_loop()
+
+        def chamar_gemini(mod_name):
+            model = genai.GenerativeModel(model_name=mod_name, system_instruction=system_prompt)
+            res = model.generate_content(contents)
+            return res.text if res else None
+
+        for m in modelos:
+            try:
+                resposta_ia = await loop.run_in_executor(None, chamar_gemini, m)
+                if resposta_ia:
+                    break
+            except Exception as e:
+                ultimo_erro = str(e)
+                print(f"Erro no modelo {m}: {e}", flush=True)
+
+        if not resposta_ia:
+            await update.message.reply_text(f"⚠️ Não consegui gerar uma resposta agora. Motivo: {ultimo_erro}")
+            return
+
+        await update.message.reply_text(resposta_ia)
+
+        try:
+            texto_tts = limpar_texto_para_tts(resposta_ia)
+            communicate = edge_tts.Communicate(texto_tts, data["voz"])
+            speech_bytes = bytearray()
+            
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    speech_bytes.extend(chunk["data"])
+
+            if speech_bytes:
+                speech_buffer = io.BytesIO(speech_bytes)
+                speech_buffer.name = "response.mp3"
+                await update.message.reply_voice(voice=speech_buffer)
+        except Exception as e_tts:
+            print(f"ERRO TTS: {e_tts}", flush=True)
+
+    except Exception as e_geral:
+        print(f"ERRO GERAL NO HANDLE_MESSAGE: {e_geral}", flush=True)
+        await update.message.reply_text("Ocorreu um erro interno ao processar sua mensagem. Tente novamente!")
+
+    finally:
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            try:
+                os.remove(temp_audio_path)
+            except Exception:
+                pass
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port, use_reloader=False)
+
+if __name__ == "__main__":
+    if not BOT_TOKEN:
+        print("ERRO: BOT_TOKEN ausente!", flush=True)
+        exit(1)
+
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(handle_callback))
+    application.add_handler(MessageHandler(filters.ALL, handle_message))
+
+    print("LinguaBoot rodando com sucesso!", flush=True)
+    application.run_polling(drop_pending_updates=True)
