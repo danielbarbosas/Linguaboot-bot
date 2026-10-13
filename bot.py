@@ -1,7 +1,6 @@
 import os
 import io
-import asyncio
-import threading
+import re
 import tempfile
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -38,6 +37,11 @@ def get_user_data(user_id):
             "historico": []
         }
     return user_sessions[user_id]
+
+def limpar_texto_para_tts(texto):
+    # Remove marcações Markdown para não quebrar a síntese de voz
+    texto_limpo = re.sub(r'[*_~`#]', '', texto)
+    return texto_limpo[:600] # Limita o tamanho do áudio para evitar timeout
 
 @app.route('/')
 def home():
@@ -238,98 +242,108 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     contents = []
     temp_audio_path = None
 
-    if update.message.voice or update.message.audio:
-        await update.message.reply_text("🎙️ Ouvindo seu áudio...")
-        try:
+    try:
+        if update.message.voice or update.message.audio:
+            msg_status = await update.message.reply_text("🎙️ Ouvindo seu áudio...")
             file_id = (update.message.voice or update.message.audio).file_id
             new_file = await context.bot.get_file(file_id)
             audio_bytes = await new_file.download_as_bytearray()
             
-            # Escreve o áudio num ficheiro temporário para o genai.upload_file
             with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as temp_file:
                 temp_file.write(bytes(audio_bytes))
                 temp_audio_path = temp_file.name
 
-            # Faz o upload oficial para a API do Gemini
-            audio_file = genai.upload_file(temp_audio_path)
+            # Executa a chamada síncrona do upload em thread para não travar o bot
+            loop = asyncio.get_running_loop()
+            audio_file = await loop.run_in_executor(None, genai.upload_file, temp_audio_path)
             contents.append(audio_file)
             contents.append("Transcreva exatamente o áudio enviado pelo aluno e responda em seguida mantendo o papel de professor de idiomas.")
-        except Exception as e:
-            print(f"ERRO AO PROCESSAR ÁUDIO: {e}", flush=True)
-            await update.message.reply_text(f"Erro ao carregar o áudio: {e}")
-            if temp_audio_path and os.path.exists(temp_audio_path):
-                os.remove(temp_audio_path)
+        else:
+            contents.append(update.message.text)
+
+        system_prompt = (
+            f"Você é o LinguaBoot, um tutor de idiomas especialista.\n"
+            f"• Idioma das aulas: {data['idioma']}\n"
+            f"• Nível do aluno: {data['nivel']}\n"
+            f"• Público: {data['publico']}\n"
+            f"• Modo atual: {data['modo']}\n\n"
+        )
+
+        if data["publico"] == "Kids":
+            system_prompt += "Mantenha o tom extremamente lúdico, amigável e simples para crianças.\n"
+        
+        if data["modo"] == "conversa":
+            system_prompt += f"Converse naturalmente sobre qualquer assunto no idioma {data['idioma']}. Ao final, adicione '💡 Dica do Professor:' com correções gentis em português."
+        elif data["modo"] == "teste_escrita":
+            system_prompt += f"Aplique um teste de escrita em {data['idioma']}. Avalie o texto (nota 0 a 10) e envie nova pergunta."
+        elif data["modo"] == "teste_pronuncia":
+            system_prompt += f"Avalie a pronúncia do áudio em {data['idioma']}. Transcreva o que entendeu e passe uma nova frase para repetir."
+
+        # Modelos atualizados
+        modelos = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
+        resposta_ia = None
+        ultimo_erro = ""
+
+        loop = asyncio.get_running_loop()
+
+        def chamar_gemini(mod_name):
+            model = genai.GenerativeModel(model_name=mod_name, system_instruction=system_prompt)
+            res = model.generate_content(contents)
+            return res.text if res else None
+
+        for m in modelos:
+            try:
+                resposta_ia = await loop.run_in_executor(None, chamar_gemini, m)
+                if resposta_ia:
+                    break
+            except Exception as e:
+                ultimo_erro = str(e)
+                print(f"Erro no modelo {m}: {e}", flush=True)
+
+        if not resposta_ia:
+            await update.message.reply_text(f"⚠️ Não consegui gerar uma resposta agora. Motivo: {ultimo_erro}")
             return
-    else:
-        contents.append(update.message.text)
 
-    system_prompt = (
-        f"Você é o LinguaBoot, um tutor de idiomas especialista.\n"
-        f"• Idioma das aulas: {data['idioma']}\n"
-        f"• Nível do aluno: {data['nivel']}\n"
-        f"• Público: {data['publico']}\n"
-        f"• Modo atual: {data['modo']}\n\n"
-    )
-
-    if data["publico"] == "Kids":
-        system_prompt += "Mantenha o tom extremamente lúdico, amigável e simples para crianças.\n"
-    
-    if data["modo"] == "conversa":
-        system_prompt += f"Converse naturalmente sobre qualquer assunto no idioma {data['idioma']}. Ao final, adicione '💡 Dica do Professor:' com correções gentis em português."
-    elif data["modo"] == "teste_escrita":
-        system_prompt += f"Aplique um teste de escrita em {data['idioma']}. Avalie o texto (nota 0 a 10) e envie nova pergunta."
-    elif data["modo"] == "teste_pronuncia":
-        system_prompt += f"Avalie a pronúncia do áudio em {data['idioma']}. Transcreva o que entendeu e passe uma nova frase para repetir."
-
-    resposta_ia = None
-    ultimo_erro = ""
-    modelos = ["gemini-1.5-flash", "gemini-1.5-pro"]
-
-    for m in modelos:
-        try:
-            model = genai.GenerativeModel(model_name=m, system_instruction=system_prompt)
-            response = model.generate_content(contents)
-            resposta_ia = response.text
-            break
-        except Exception as e:
-            ultimo_erro = str(e)
-            print(f"Erro no modelo {m}: {e}", flush=True)
-
-    # Limpeza do ficheiro temporário do áudio
-    if temp_audio_path and os.path.exists(temp_audio_path):
-        os.remove(temp_audio_path)
-
-    if not resposta_ia:
-        await update.message.reply_text(f"Erro na API do Gemini: {ultimo_erro}")
-        return
-
-    try:
         await update.message.reply_text(resposta_ia)
 
-        communicate = edge_tts.Communicate(resposta_ia, data["voz"])
-        speech_bytes = bytearray()
-        
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                speech_bytes.extend(chunk["data"])
+        # Geração do Áudio via Edge-TTS sem travar
+        try:
+            texto_tts = limpar_texto_para_tts(resposta_ia)
+            communicate = edge_tts.Communicate(texto_tts, data["voz"])
+            speech_bytes = bytearray()
+            
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    speech_bytes.extend(chunk["data"])
 
-        speech_buffer = io.BytesIO(speech_bytes)
-        speech_buffer.name = "response.mp3"
-        await update.message.reply_voice(voice=speech_buffer)
+            if speech_bytes:
+                speech_buffer = io.BytesIO(speech_bytes)
+                speech_buffer.name = "response.mp3"
+                await update.message.reply_voice(voice=speech_buffer)
+        except Exception as e_tts:
+            print(f"ERRO TTS: {e_tts}", flush=True)
 
-    except Exception as e:
-        print(f"ERRO TTS: {e}", flush=True)
+    except Exception as e_geral:
+        print(f"ERRO GERAL NO HANDLE_MESSAGE: {e_geral}", flush=True)
+        await update.message.reply_text("Ocorreu um erro interno ao processar sua mensagem. Tente novamente!")
 
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, use_reloader=False)
+    finally:
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            try:
+                os.remove(temp_audio_path)
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     if not BOT_TOKEN:
         print("ERRO: BOT_TOKEN ausente!", flush=True)
         exit(1)
 
-    threading.Thread(target=run_flask, daemon=True).start()
+    # Inicia o Flask na thread secundária de forma limpa
+    from werkzeug.serving import run_simple
+    port = int(os.environ.get("PORT", 10000))
+    flask_thread = threading.Thread(target=lambda: run_simple("0.0.0.0", port, app), daemon=True)
+    flask_thread.start()
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
