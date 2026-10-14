@@ -1,151 +1,176 @@
 import os
-import io
-import re
-import asyncio
+import logging
+import threading
 import tempfile
 from flask import Flask
-import threading
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters,
-)
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import google.generativeai as genai
-import edge_tts
 
+# --- CONFIG ---
+logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+if not BOT_TOKEN or not GEMINI_API_KEY:
+    logging.error("Faltando BOT_TOKEN ou GEMINI_API_KEY")
 
-app = Flask(__name__)
-user_sessions = {}
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-1.5-flash")
 
-def get_user_data(user_id):
-    if user_id not in user_sessions:
-        user_sessions[user_id] = {
-            "step": "idioma",
-            "idioma": None,
-            "publico": None,
-            "nivel": None,
-            "voz": "en-US-AriaNeural",
-            "modo": "conversa",
-        }
-    return user_sessions[user_id]
+app_flask = Flask(__name__)
 
-def limpar_texto_para_tts(texto):
-    texto_limpo = re.sub(r'[*_~`#]', '', texto)
-    return texto_limpo[:500]
-
-@app.route('/')
+@app_flask.route('/')
 def home():
-    return "LinguaBoot Online"
+    return "LinguaBoot com Gemini Online!"
 
+user_languages = {}
+user_levels = {}
+
+# --- FUNÇÕES GEMINI ---
+def transcribe_and_correct_gemini(file_path, lang="english"):
+    try:
+        # Gemini 1.5 consegue ler áudio direto
+        audio_file = genai.upload_file(file_path)
+        
+        prompt = f"""
+        Você é o LinguaBoot, professor de idiomas nativo de {lang}.
+        
+        1. Transcreva o áudio exatamente
+        2. Corrija a gramática
+        3. Traduza para português
+        4. Explique o erro principal
+        5. Dê dica de pronúncia
+        6. Dê nota 0-10
+        
+        Seja animado, use emojis. Se não entender o áudio, diga.
+        """
+        
+        response = model.generate_content([prompt, audio_file])
+        return response.text
+    except Exception as e:
+        logging.error(f"Erro Gemini Audio: {e}")
+        return None
+
+def correct_text_gemini(text, lang="english"):
+    try:
+        prompt = f"""
+        Você é o LinguaBoot, professor de {lang} super divertido.
+
+        Aluno escreveu/falou: "{text}"
+
+        Responda com:
+        📝 Frase corrigida:
+        🇧🇷 Tradução:
+        📚 Correção explicada:
+        🗣️ Dica de pronúncia:
+        ⭐ Nota 0-10 + motivação
+
+        Use emojis e seja curto e animado.
+        """
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        logging.error(f"Erro Gemini Text: {e}")
+        return f"Recebi: {text}\nContinue praticando! 🚀"
+
+# --- HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    data = get_user_data(user_id)
-    
-    if not data["idioma"]:
-        await enviar_passo_idioma(update, context)
-    else:
-        await enviar_menu_principal(update, context)
+    user_levels[user_id] = 1
+    await update.message.reply_text(
+        "Olá! Eu sou o LinguaBoot com Gemini 🤖✨\n\n"
+        "Seu professor de idiomas turbinado com Google Gemini!\n\n"
+        "🎙️ Mande ÁUDIO em Inglês ou Espanhol\n"
+        "📝 Ou digite um texto\n"
+        "Eu corrijo, traduzo e dou nota!\n\n"
+        "Comandos:\n"
+        "/english - Inglês 🇺🇸\n"
+        "/spanish - Espanhol 🇪🇸\n"
+        "/level - Ver seu nível\n"
+        "/help - Ajuda"
+    )
 
-async def enviar_passo_idioma(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = "👋 Olá! Bem-vindo ao LinguaBoot 🤖📚\n\n**Passo 1/3:** Qual idioma você deseja praticar?"
-    kb = [
-        [InlineKeyboardButton("🇺🇸 Inglês", callback_data="set_idioma_Inglês"), InlineKeyboardButton("🇪🇸 Espanhol", callback_data="set_idioma_Espanhol")],
-        [InlineKeyboardButton("🇫🇷 Francês", callback_data="set_idioma_Francês"), InlineKeyboardButton("🇮🇹 Italiano", callback_data="set_idioma_Italiano")]
-    ]
-    markup = InlineKeyboardMarkup(kb)
-    if update.message:
-        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=markup)
-    elif update.callback_query:
-        await update.callback_query.message.edit_text(msg, parse_mode="Markdown", reply_markup=markup)
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📚 Como usar o LinguaBoot Gemini:\n\n"
+        "1. Escolha /english ou /spanish\n"
+        "2. Mande um áudio falando\n"
+        "3. Eu transcrevo e corrijo com Gemini 1.5\n"
+        "4. Ganhe XP e suba de nível!\n\n"
+        "Dica: Quanto mais você pratica, mais XP ganha!"
+    )
 
-async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = "🎯 **LinguaBoot Prontinho!**\n\nPode enviar qualquer mensagem de texto ou áudio para conversar comigo!"
-    if update.message:
-        await update.message.reply_text(msg, parse_mode="Markdown")
-    elif update.callback_query:
-        await update.callback_query.message.edit_text(msg, parse_mode="Markdown")
+async def set_english(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_languages[update.effective_user.id] = "english"
+    await update.message.reply_text("Modo Inglês ativado! 🇺🇸 Mande seu áudio ou texto!")
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    data = get_user_data(user_id)
-    cb = query.data
+async def set_spanish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_languages[update.effective_user.id] = "spanish"
+    await update.message.reply_text("Modo Espanhol ativado! 🇪🇸 Mande seu áudio ou texto!")
 
-    if cb.startswith("set_idioma_"):
-        data["idioma"] = cb.replace("set_idioma_", "")
-        await enviar_menu_principal(update, context)
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        await update.message.reply_text("Por favor, envie uma mensagem de texto!")
-        return
-
-    texto_usuario = update.message.text
+async def level_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    data = get_user_data(user_id)
-    idioma = data["idioma"] or "Inglês"
+    level = user_levels.get(user_id, 1)
+    await update.message.reply_text(f"🏆 Seu nível atual: {level}\nContinue praticando pra subir!")
 
-    # Envia confirmação imediata para testar a resposta do Telegram
-    msg_espera = await update.message.reply_text("🤔 A pensar na resposta...")
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    lang = user_languages.get(user_id, "english")
+    
+    await update.message.reply_text("Analisando com Gemini... 🤔✨")
+    
+    correction = correct_text_gemini(update.message.text, lang)
+    
+    # Sistema de XP simples
+    user_levels[user_id] = user_levels.get(user_id, 1) + 1
+    
+    await update.message.reply_text(correction)
+    await update.message.reply_text(f"✨ +1 XP! Você está no nível {user_levels[user_id]}")
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    lang = user_languages.get(user_id, "english")
+    
+    await update.message.reply_text("Recebi seu áudio! Gemini está transcrevendo... 🎧✨")
 
     try:
-        # Chamada direta e simplificada do Gemini
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        prompt = f"Você é um tutor de {idioma}. Responda de forma curta e amigável ao aluno: {texto_usuario}"
-        
-        loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(None, lambda: model.generate_content(prompt))
-        
-        resposta_ia = response.text if response and response.text else "Não consegui gerar a resposta."
+        file = await context.bot.get_file(update.message.voice.file_id)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tf:
+            await file.download_to_drive(tf.name)
+            temp_path = tf.name
 
-        # Atualiza a mensagem no Telegram com a resposta da IA
-        await msg_espera.edit_text(resposta_ia)
+        result = transcribe_and_correct_gemini(temp_path, lang)
+        os.unlink(temp_path)
 
-        # Geração do áudio
-        try:
-            texto_tts = limpar_texto_para_tts(resposta_ia)
-            communicate = edge_tts.Communicate(texto_tts, data["voz"])
-            speech_bytes = bytearray()
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    speech_bytes.extend(chunk["data"])
+        if not result:
+            await update.message.reply_text("Não consegui entender o áudio, tenta de novo? 🎤")
+            return
 
-            if speech_bytes:
-                speech_buffer = io.BytesIO(speech_bytes)
-                speech_buffer.name = "response.mp3"
-                await update.message.reply_voice(voice=speech_buffer)
-        except Exception as e_tts:
-            print(f"Erro TTS: {e_tts}")
+        user_levels[user_id] = user_levels.get(user_id, 1) + 2
+        await update.message.reply_text(result)
+        await update.message.reply_text(f"🎙️ +2 XP por áudio! Nível: {user_levels[user_id]}")
 
     except Exception as e:
-        print(f"Erro Gemini: {e}")
-        await msg_espera.edit_text(f"⚠️ Erro ao consultar o Gemini: {e}")
+        logging.error(f"Erro voice: {e}")
+        await update.message.reply_text("Deu um erro no áudio, tenta mandar de novo!")
 
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, use_reloader=False)
-
-if __name__ == "__main__":
-    if not BOT_TOKEN or not GEMINI_API_KEY:
-        print("ERRO: Tokens ausentes!")
-        exit(1)
-
-    threading.Thread(target=run_flask, daemon=True).start()
-
+def run_bot():
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(handle_callback))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CommandHandler("help", help_cmd))
+    application.add_handler(CommandHandler("english", set_english))
+    application.add_handler(CommandHandler("spanish", set_spanish))
+    application.add_handler(CommandHandler("level", level_cmd))
+    application.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    application.add_handler(MessageHandler(filters.AUDIO, handle_voice))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    logging.info("Bot LinguaBoot Gemini started - polling...")
+    application.run_polling()
 
-    print("Bot em execução...")
-    application.run_polling(drop_pending_updates=True)
+# --- RENDER FIX - TEM QUE FICAR FORA DO IF ---
+threading.Thread(target=run_bot, daemon=True).start()
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app_flask.run(host="0.0.0.0", port=port)
