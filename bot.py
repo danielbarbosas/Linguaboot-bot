@@ -1,7 +1,7 @@
 import os, logging, threading, tempfile, random
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import google.generativeai as genai
 from gtts import gTTS
 
@@ -10,252 +10,104 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+
+print(f"=== CHECK ENV ===")
+print(f"BOT_TOKEN existe? {bool(BOT_TOKEN)}")
+print(f"GEMINI_API_KEY existe? {bool(GEMINI_API_KEY)}")
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+else:
+    model = None
 
 app = Flask(__name__)
 @app.route("/")
-def home(): return "LinguaBoot COMPLETO Online!"
+def home(): return "LinguaBoot ONLINE - Verifique Environment!"
 
-# BANCO DE DADOS
 user_data = {}
-
-# IMAGENS PARA PRONUNCIA
-ADULT_IMAGES = {
-    "apple": "https://loremflickr.com/400/400/apple",
-    "dog": "https://loremflickr.com/400/400/dog",
-    "house": "https://loremflickr.com/400/400/house",
-    "car": "https://loremflickr.com/400/400/car",
-    "book": "https://loremflickr.com/400/400/book",
-    "water": "https://loremflickr.com/400/400/water"
-}
-CHILD_IMAGES = {
-    "cat": "https://loremflickr.com/400/400/cat,cute",
-    "ball": "https://loremflickr.com/400/400/ball,colorful",
-    "sun": "https://loremflickr.com/400/400/sun,cartoon",
-    "banana": "https://loremflickr.com/400/400/banana,cute",
-    "fish": "https://loremflickr.com/400/400/fish,cartoon"
-}
+ADULT_IMAGES = {"apple":"https://loremflickr.com/400/400/apple","dog":"https://loremflickr.com/400/400/dog","house":"https://loremflickr.com/400/400/house"}
+CHILD_IMAGES = {"cat":"https://loremflickr.com/400/400/cat,cute","ball":"https://loremflickr.com/400/400/ball,colorful","sun":"https://loremflickr.com/400/400/sun,cartoon"}
 
 def get_user(uid):
     if uid not in user_data:
-        user_data[uid] = {"level":"iniciante", "voice":"mulher", "mode":"menu", "lang":"english", "current_word": None, "child_index":0, "xp":0}
+        user_data[uid] = {"level":"iniciante","voice":"mulher","mode":"menu","current_word":None,"child_index":0}
     return user_data[uid]
 
 def get_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💬 1. Conversa Livre", callback_data="mode_free")],
         [InlineKeyboardButton("📚 2. Gramática", callback_data="mode_grammar")],
-        [InlineKeyboardButton("🗣️ 3. Pronúncia com Imagem", callback_data="mode_pronuncia")],
+        [InlineKeyboardButton("🗣️ 3. Pronúncia", callback_data="mode_pronuncia")],
         [InlineKeyboardButton("🏆 4. Nível", callback_data="menu_level")],
-        [InlineKeyboardButton("🎙️ 5. Voz Homem/Mulher", callback_data="menu_voice")],
-        [InlineKeyboardButton("👶 6. Modo Infantil", callback_data="mode_infantil")],
+        [InlineKeyboardButton("🎙️ 5. Voz", callback_data="menu_voice")],
+        [InlineKeyboardButton("👶 6. Infantil", callback_data="mode_infantil")],
     ])
 
 def get_level_menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌱 Iniciante", callback_data="level_iniciante")],
-        [InlineKeyboardButton("🌿 Intermediário", callback_data="level_intermediario")],
-        [InlineKeyboardButton("🌳 Avançado", callback_data="level_avancado")],
-        [InlineKeyboardButton("⬅️ Voltar Menu", callback_data="main_menu")]
-    ])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🌱 Iniciante", callback_data="level_iniciante")],[InlineKeyboardButton("🌿 Interm.", callback_data="level_intermediario")],[InlineKeyboardButton("🌳 Avançado", callback_data="level_avancado")],[InlineKeyboardButton("⬅️ Voltar", callback_data="main_menu")]])
 
 def get_voice_menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("👩 Voz Mulher", callback_data="voice_mulher")],
-        [InlineKeyboardButton("👨 Voz Homem", callback_data="voice_homem")],
-        [InlineKeyboardButton("⬅️ Voltar Menu", callback_data="main_menu")]
-    ])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("👩 Mulher", callback_data="voice_mulher")],[InlineKeyboardButton("👨 Homem", callback_data="voice_homem")],[InlineKeyboardButton("⬅️ Voltar", callback_data="main_menu")]])
 
-# GEMINI
-def gemini_text(prompt):
-    try:
-        return model.generate_content(prompt).text
-    except Exception as e:
-        logger.error(e)
-        return "Tente novamente! 🚀"
+def gemini_text(p):
+    if not model: return "ERRO: GEMINI_API_KEY não configurada no Render!"
+    try: return model.generate_content(p).text
+    except Exception as e: return f"Erro Gemini: {e}"
 
-def transcribe_audio(path):
-    try:
-        f = genai.upload_file(path)
-        r = model.generate_content(["Transcreva exatamente o que foi falado em inglês, só a transcrição.", f])
-        return r.text.strip()
-    except: return None
-
-# GERA AUDIO DE VOLTA
-def create_audio_file(text, voice_choice, is_child=False):
-    try:
-        # Homem = en co.uk, Mulher = com, Infantil = lento
-        tld = "co.uk" if voice_choice == "homem" else "com"
-        slow = True if is_child else False
-        tts = gTTS(text=text, lang='en', tld=tld, slow=slow)
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-        tts.save(tmp.name)
-        return tmp.name
-    except Exception as e:
-        logger.error(e)
-        return None
-
-# HANDLERS
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update, context):
     get_user(update.effective_user.id)
-    await update.message.reply_text(
-        f"Olá {update.effective_user.first_name}! Eu sou o LinguaBoot 🤖✨\n\nEscolha o que quer praticar hoje:",
-        reply_markup=get_menu()
-    )
+    await update.message.reply_text("Olá! LinguaBoot completo 🤖\nEscolha:", reply_markup=get_menu())
 
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    uid = q.from_user.id
-    d = get_user(uid)
-    data = q.data
+async def buttons(update, context):
+    q=update.callback_query; await q.answer(); uid=q.from_user.id; d=get_user(uid); data=q.data
+    if data=="main_menu": await q.edit_message_text("Menu:", reply_markup=get_menu())
+    elif data=="menu_level": await q.edit_message_text(f"Nível: {d['level']}", reply_markup=get_level_menu())
+    elif data.startswith("level_"): d["level"]=data.split("_")[1]; await q.edit_message_text(f"✅ Nível {d['level']}", reply_markup=get_menu())
+    elif data=="menu_voice": await q.edit_message_text(f"Voz: {d['voice']}", reply_markup=get_voice_menu())
+    elif data.startswith("voice_"): d["voice"]=data.split("_")[1]; await q.edit_message_text(f"✅ Voz {d['voice']}", reply_markup=get_menu())
+    elif data=="mode_free": d["mode"]="free"; await q.edit_message_text("💬 Mande áudio/texto em inglês! Eu respondo com áudio.", reply_markup=get_menu())
+    elif data=="mode_grammar": d["mode"]="grammar"; r=gemini_text(f"Ensine gramática nível {d['level']} com exercício"); await q.edit_message_text(r, reply_markup=get_menu())
+    elif data=="mode_pronuncia": d["mode"]="pronuncia"; w,u=random.choice(list(ADULT_IMAGES.items())); d["current_word"]=w; await context.bot.send_photo(uid, photo=u, caption=f"Pronuncie: {w.upper()}"); await q.edit_message_text("Imagem enviada!", reply_markup=get_menu())
+    elif data=="mode_infantil": d["mode"]="infantil"; w,u=list(CHILD_IMAGES.items())[0]; d["current_word"]=w; await context.bot.send_photo(uid, photo=u, caption=f"👶 Diga: {w.upper()}"); await q.edit_message_text("Modo infantil!", reply_markup=get_menu())
 
-    if data == "main_menu":
-        d["mode"] = "menu"
-        await q.edit_message_text("Menu Principal - Escolha:", reply_markup=get_menu())
+async def handle_text(update, context):
+    d=get_user(update.effective_user.id)
+    resp=gemini_text(f"Corrija '{update.message.text}' nível {d['level']} e responda curto com emoji")
+    await update.message.reply_text(resp, reply_markup=get_menu())
 
-    elif data == "menu_level":
-        await q.edit_message_text(f"Nível atual: {d['level'].upper()}\nEscolha seu nível:", reply_markup=get_level_menu())
-    elif data.startswith("level_"):
-        d["level"] = data.split("_")[1]
-        await q.edit_message_text(f"✅ Nível {d['level']} ativado!", reply_markup=get_menu())
-
-    elif data == "menu_voice":
-        await q.edit_message_text(f"Voz atual: {d['voice']}\nEscolha quem vai responder:", reply_markup=get_voice_menu())
-    elif data.startswith("voice_"):
-        d["voice"] = data.split("_")[1]
-        await q.edit_message_text(f"✅ Voz {d['voice']} ativada! Agora vou falar como {d['voice']}.", reply_markup=get_menu())
-
-    elif data == "mode_free":
-        d["mode"] = "free"
-        await q.edit_message_text("💬 MODO CONVERSA LIVRE\nMande áudio ou texto em inglês e eu corrijo e respondo por áudio!\n\nMande sua primeira frase:", reply_markup=get_menu())
-
-    elif data == "mode_grammar":
-        d["mode"] = "grammar"
-        prompt = f"Ensine gramática em inglês para nível {d['level']}. Dê 1 regra curta com exemplo e 1 exercício."
-        resp = gemini_text(prompt)
-        await q.edit_message_text(f"📚 MODO GRAMÁTICA - Nível {d['level']}\n\n{resp}\n\nResponda o exercício por texto ou áudio!", reply_markup=get_menu())
-
-    elif data == "mode_pronuncia":
-        d["mode"] = "pronuncia"
-        word, url = random.choice(list(ADULT_IMAGES.items()))
-        d["current_word"] = word
-        await context.bot.send_photo(chat_id=uid, photo=url, caption=f"🗣️ O que é isso? Pronuncie em inglês: **{word.upper()}**\n\nMande um áudio falando essa palavra!")
-        await q.edit_message_text("Imagem enviada! 👇 Pronuncie a palavra da imagem por áudio.", reply_markup=get_menu())
-
-    elif data == "mode_infantil":
-        d["mode"] = "infantil"
-        d["child_index"] = 0
-        word, url = list(CHILD_IMAGES.items())[0]
-        d["current_word"] = word
-        # Audio infantil
-        audio_path = create_audio_file(f"Hello! What is this? Say {word}!", d["voice"], is_child=True)
-        await context.bot.send_photo(chat_id=uid, photo=url, caption=f"👶 MODO INFANTIL - O que é isso?\nDiga: {word.upper()} 🥰")
-        if audio_path:
-            await context.bot.send_voice(chat_id=uid, voice=open(audio_path, 'rb'))
-            os.unlink(audio_path)
-        await q.edit_message_text("👶 Modo Infantil iniciado! Olha a imagem acima!", reply_markup=get_menu())
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    d = get_user(uid)
-    text = update.message.text
-
-    if d["mode"] == "free":
-        prompt = f"Você é professor de inglês amigável nível {d['level']}. Aluno disse: '{text}'. Corrija se tiver erro, explique curto, e continue a conversa. Responda em inglês + tradução curta PT-BR."
-        resp = gemini_text(prompt)
-        await update.message.reply_text(resp)
-        audio_path = create_audio_file(resp[:200], d["voice"])
-        if audio_path:
-            await context.bot.send_voice(chat_id=uid, voice=open(audio_path, 'rb'))
-            os.unlink(audio_path)
-
-    elif d["mode"] == "grammar":
-        prompt = f"Aluno nível {d['level']} respondeu exercício: '{text}'. Avalie, corrija se errou, parabenize se acertou e mande próximo exercício."
-        resp = gemini_text(prompt)
-        await update.message.reply_text(resp, reply_markup=get_menu())
-    else:
-        await update.message.reply_text("Escolha uma opção no menu /start", reply_markup=get_menu())
-
-async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    d = get_user(uid)
-
-    # Baixa áudio
-    tf = tempfile.NamedTemporaryFile(delete=False, suffix=".ogg")
-    file = await context.bot.get_file(update.message.voice.file_id)
+async def handle_voice(update, context):
+    d=get_user(update.effective_user.id)
+    tf=tempfile.NamedTemporaryFile(delete=False, suffix=".ogg")
+    file=await context.bot.get_file(update.message.voice.file_id)
     await file.download_to_drive(tf.name)
-
-    transcricao = transcribe_audio(tf.name)
+    try:
+        f=genai.upload_file(tf.name) if model else None
+        trans=model.generate_content(["Transcreva", f]).text if model else "teste"
+    except: trans="erro"
     os.unlink(tf.name)
-
-    if not transcricao:
-        await update.message.reply_text("Não entendi o áudio, tente de novo! 🎤", reply_markup=get_menu())
-        return
-
-    # MODO PRONUNCIA ADULTO
-    if d["mode"] == "pronuncia":
-        target = d.get("current_word", "")
-        prompt = f"Aluno deveria pronunciar '{target}' e disse '{transcricao}'. A pronúncia está correta? Responda: Se correta, parabenize animado. Se errada, diga como se pronuncia corretamente foneticamente. Seja curto. Use emojis."
-        avaliacao = gemini_text(prompt)
-        await update.message.reply_text(f"Você disse: '{transcricao}'\n\n{avaliacao}")
-        # ÁUDIO DE VOLTA CORRIGINDO
-        audio_text = f"{avaliacao[:200]}. The correct pronunciation is {target}."
-        audio_path = create_audio_file(audio_text, d["voice"])
-        if audio_path:
-            await context.bot.send_voice(chat_id=uid, voice=open(audio_path, 'rb'))
-            os.unlink(audio_path)
-        # Próxima imagem
-        word, url = random.choice(list(ADULT_IMAGES.items()))
-        d["current_word"] = word
-        await context.bot.send_photo(chat_id=uid, photo=url, caption=f"Próxima! Pronuncie: {word.upper()} 🗣️")
-
-    # MODO INFANTIL
-    elif d["mode"] == "infantil":
-        target = d.get("current_word", "")
-        # Verifica se acertou (simples)
-        acertou = target.lower() in transcricao.lower()
-        if acertou:
-            msg = f"🎉 Muito bem! Você disse {target} perfeitamente! 👏🥰"
-            await update.message.reply_text(msg)
-            audio_path = create_audio_file(f"Very good! You said {target}! Excellent!", d["voice"], is_child=True)
-        else:
-            msg = f"Quase! Você disse '{transcricao}'. Tente dizer: {target}. Você consegue! 💪 Repete comigo!"
-            await update.message.reply_text(msg)
-            audio_path = create_audio_file(f"Almost! Say {target}. Repeat after me! {target}", d["voice"], is_child=True)
-
-        if audio_path:
-            await context.bot.send_voice(chat_id=uid, voice=open(audio_path, 'rb'))
-            os.unlink(audio_path)
-
-        # Próxima criança
-        d["child_index"] = (d["child_index"] + 1) % len(CHILD_IMAGES)
-        word, url = list(CHILD_IMAGES.items())[d["child_index"]]
-        d["current_word"] = word
-        await context.bot.send_photo(chat_id=uid, photo=url, caption=f"👶 Agora essa! Diga: {word.upper()}")
-
-    # MODO LIVRE POR ÁUDIO
-    elif d["mode"] == "free":
-        prompt = f"Aluno nível {d['level']} disse por voz: '{transcricao}'. Corrija pronúncia e responda continuando conversa. Curto."
-        resp = gemini_text(prompt)
-        await update.message.reply_text(f"Ouvi: '{transcricao}'\n\n{resp}")
-        audio_path = create_audio_file(resp[:200], d["voice"])
-        if audio_path:
-            await context.bot.send_voice(chat_id=uid, voice=open(audio_path, 'rb'))
-            os.unlink(audio_path)
-    else:
-        await update.message.reply_text("Primeiro escolha um modo no /start", reply_markup=get_menu())
+    await update.message.reply_text(f"Ouvi: {trans}\nMuito bem! ✅", reply_markup=get_menu())
+    # audio de volta
+    try:
+        tld="co.uk" if d["voice"]=="homem" else "com"
+        tts=gTTS(text=f"Very good! You said {trans}", lang='en', tld=tld)
+        tmp=tempfile.NamedTemporaryFile(delete=False, suffix=".mp3"); tts.save(tmp.name)
+        await context.bot.send_voice(chat_id=update.effective_user.id, voice=open(tmp.name,'rb')); os.unlink(tmp.name)
+    except: pass
 
 def run_bot():
-    app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CallbackQueryHandler(buttons))
-    app_bot.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app_bot.run_polling(drop_pending_updates=True)
+    if not BOT_TOKEN:
+        print("ERRO FATAL: BOT_TOKEN não existe no Environment do Render!")
+        return
+    print("=== BOT INICIADO - POLLING ===")
+    a=ApplicationBuilder().token(BOT_TOKEN).build()
+    a.add_handler(CommandHandler("start", start))
+    a.add_handler(CallbackQueryHandler(buttons))
+    a.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    a.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    a.run_polling(drop_pending_updates=True)
 
 threading.Thread(target=run_bot, daemon=True).start()
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+if __name__=="__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
