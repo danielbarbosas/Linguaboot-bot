@@ -2,8 +2,7 @@ import os, logging, threading, tempfile, random
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
-from gtts import gTTS
-# CORREÇÃO DA CHAVE - NOVA BIBLIOTECA
+from gTTS import gTTS
 from google import genai
 from google.genai import types
 
@@ -17,17 +16,17 @@ print(f"=== CHECK ENV ===")
 print(f"BOT_TOKEN existe? {bool(BOT_TOKEN)}")
 print(f"GEMINI_API_KEY existe? {bool(GEMINI_API_KEY)}")
 
-# CLIENT NOVO QUE ACEITA AQ.Ab8
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 app = Flask(__name__)
-@app.route("/")
-def home(): return "LinguaBoot COMPLETO Online!"
 
-# BANCO DE DADOS
+@app.route("/")
+def home():
+    return "LinguaBoot COMPLETO Online!"
+
+# BANCO DE DADOS EM MEMÓRIA
 user_data = {}
 
-# IMAGENS PARA PRONUNCIA
 ADULT_IMAGES = {
     "apple": "https://loremflickr.com/400/400/apple",
     "dog": "https://loremflickr.com/400/400/dog",
@@ -36,6 +35,7 @@ ADULT_IMAGES = {
     "book": "https://loremflickr.com/400/400/book",
     "water": "https://loremflickr.com/400/400/water"
 }
+
 CHILD_IMAGES = {
     "cat": "https://loremflickr.com/400/400/cat,cute",
     "ball": "https://loremflickr.com/400/400/ball,colorful",
@@ -46,7 +46,7 @@ CHILD_IMAGES = {
 
 def get_user(uid):
     if uid not in user_data:
-        user_data[uid] = {"level":"iniciante", "voice":"mulher", "mode":"menu", "lang":"english", "current_word": None, "child_index":0, "xp":0}
+        user_data[uid] = {"level": "iniciante", "voice": "mulher", "mode": "menu", "lang": "english", "current_word": None, "child_index": 0, "xp": 0}
     return user_data[uid]
 
 def get_menu():
@@ -74,7 +74,6 @@ def get_voice_menu():
         [InlineKeyboardButton("⬅️ Voltar Menu", callback_data="main_menu")]
     ])
 
-# GEMINI CORRIGIDO
 def gemini_text(prompt):
     try:
         if not client:
@@ -82,33 +81,39 @@ def gemini_text(prompt):
         response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         return response.text
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Erro Gemini Text: {e}")
         return f"Erro Gemini: {e}"
 
 def transcribe_audio(path):
     try:
-        if not client: return None
-        uploaded = client.files.upload(file=path)
-        r = client.models.generate_content(model="gemini-2.0-flash", contents=["Transcreva exatamente o que foi falado em inglês, só a transcrição.", uploaded])
+        if not client:
+            return None
+        uploaded = client.files.upload(
+            file=path,
+            config=types.UploadFileConfig(mime_type="audio/ogg")
+        )
+        r = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=["Transcreva exatamente o que foi falado em inglês, só a transcrição.", uploaded]
+        )
         return r.text.strip()
     except Exception as e:
         logger.error(f"Erro transcrição: {e}")
         return None
 
-# GERA AUDIO DE VOLTA
 def create_audio_file(text, voice_choice, is_child=False):
     try:
         tld = "co.uk" if voice_choice == "homem" else "com"
         slow = True if is_child else False
-        tts = gTTS(text=text, lang='en', tld=tld, slow=slow)
+        clean_text = text[:200].rsplit('.', 1)[0] if len(text) > 200 else text
+        tts = gTTS(text=clean_text, lang='en', tld=tld, slow=slow)
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
         tts.save(tmp.name)
         return tmp.name
     except Exception as e:
-        logger.error(e)
+        logger.error(f"Erro gTTS: {e}")
         return None
 
-# HANDLERS
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_user(update.effective_user.id)
     await update.message.reply_text(
@@ -158,7 +163,8 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         audio_path = create_audio_file(f"Hello! What is this? Say {word}!", d["voice"], is_child=True)
         await context.bot.send_photo(chat_id=uid, photo=url, caption=f"👶 MODO INFANTIL - O que é isso?\nDiga: {word.upper()} 🥰")
         if audio_path:
-            await context.bot.send_voice(chat_id=uid, voice=open(audio_path, 'rb'))
+            with open(audio_path, 'rb') as voice_file:
+                await context.bot.send_voice(chat_id=uid, voice=voice_file)
             os.unlink(audio_path)
         await q.edit_message_text("👶 Modo Infantil iniciado! Olha a imagem acima!", reply_markup=get_menu())
 
@@ -170,9 +176,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prompt = f"Você é professor de inglês amigável nível {d['level']}. Aluno disse: '{text}'. Corrija se tiver erro, explique curto, e continue a conversa. Responda em inglês + tradução curta PT-BR."
         resp = gemini_text(prompt)
         await update.message.reply_text(resp)
-        audio_path = create_audio_file(resp[:200], d["voice"])
+        audio_path = create_audio_file(resp, d["voice"])
         if audio_path:
-            await context.bot.send_voice(chat_id=uid, voice=open(audio_path, 'rb'))
+            with open(audio_path, 'rb') as voice_file:
+                await context.bot.send_voice(chat_id=uid, voice=voice_file)
             os.unlink(audio_path)
     elif d["mode"] == "grammar":
         prompt = f"Aluno nível {d['level']} respondeu exercício: '{text}'. Avalie, corrija se errou, parabenize se acertou e mande próximo exercício."
@@ -185,25 +192,35 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     d = get_user(uid)
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".ogg")
-    file = await context.bot.get_file(update.message.voice.file_id)
-    await file.download_to_drive(tf.name)
-    transcricao = transcribe_audio(tf.name)
-    os.unlink(tf.name)
+    
+    try:
+        file = await context.bot.get_file(update.message.voice.file_id)
+        await file.download_to_drive(tf.name)
+        transcricao = transcribe_audio(tf.name)
+    finally:
+        if os.path.exists(tf.name):
+            os.unlink(tf.name)
+
     if not transcricao:
         await update.message.reply_text("Não entendi o áudio, tente de novo! 🎤", reply_markup=get_menu())
         return
+
     if d["mode"] == "pronuncia":
         target = d.get("current_word", "")
         prompt = f"Aluno deveria pronunciar '{target}' e disse '{transcricao}'. A pronúncia está correta? Responda curto com emojis."
         avaliacao = gemini_text(prompt)
         await update.message.reply_text(f"Você disse: '{transcricao}'\n\n{avaliacao}")
-        audio_path = create_audio_file(f"{avaliacao[:200]}. The correct pronunciation is {target}.", d["voice"])
+        
+        audio_path = create_audio_file(f"The correct pronunciation is {target}.", d["voice"])
         if audio_path:
-            await context.bot.send_voice(chat_id=uid, voice=open(audio_path, 'rb'))
+            with open(audio_path, 'rb') as voice_file:
+                await context.bot.send_voice(chat_id=uid, voice=voice_file)
             os.unlink(audio_path)
+            
         word, url = random.choice(list(ADULT_IMAGES.items()))
         d["current_word"] = word
         await context.bot.send_photo(chat_id=uid, photo=url, caption=f"Próxima! Pronuncie: {word.upper()} 🗣️")
+
     elif d["mode"] == "infantil":
         target = d.get("current_word", "")
         acertou = target.lower() in transcricao.lower()
@@ -213,21 +230,27 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             msg = f"Quase! Você disse '{transcricao}'. Tente dizer: {target}. Você consegue! 💪"
             audio_path = create_audio_file(f"Almost! Say {target}. Repeat after me! {target}", d["voice"], is_child=True)
+            
         await update.message.reply_text(msg)
         if audio_path:
-            await context.bot.send_voice(chat_id=uid, voice=open(audio_path, 'rb'))
+            with open(audio_path, 'rb') as voice_file:
+                await context.bot.send_voice(chat_id=uid, voice=voice_file)
             os.unlink(audio_path)
+            
         d["child_index"] = (d["child_index"] + 1) % len(CHILD_IMAGES)
         word, url = list(CHILD_IMAGES.items())[d["child_index"]]
         d["current_word"] = word
         await context.bot.send_photo(chat_id=uid, photo=url, caption=f"👶 Agora essa! Diga: {word.upper()}")
+
     elif d["mode"] == "free":
         prompt = f"Aluno nível {d['level']} disse por voz: '{transcricao}'. Corrija pronúncia e responda continuando conversa. Curto."
         resp = gemini_text(prompt)
         await update.message.reply_text(f"Ouvi: '{transcricao}'\n\n{resp}")
-        audio_path = create_audio_file(resp[:200], d["voice"])
+        
+        audio_path = create_audio_file(resp, d["voice"])
         if audio_path:
-            await context.bot.send_voice(chat_id=uid, voice=open(audio_path, 'rb'))
+            with open(audio_path, 'rb') as voice_file:
+                await context.bot.send_voice(chat_id=uid, voice=voice_file)
             os.unlink(audio_path)
     else:
         await update.message.reply_text("Primeiro escolha um modo no /start", reply_markup=get_menu())
