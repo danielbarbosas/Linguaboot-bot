@@ -22,6 +22,24 @@ if ($token -notmatch '^\d{6,}:[A-Za-z0-9_-]{30,}$') {
     exit 1
 }
 
+Write-Host ""
+Write-Host "Validando o token no Telegram..."
+try {
+    $check = Invoke-RestMethod -Uri "https://api.telegram.org/bot$token/getMe" -TimeoutSec 30
+} catch {
+    $check = $null
+}
+
+if (-not $check -or -not $check.ok) {
+    Write-Host "[ERRO] O Telegram recusou este token (nao autorizado)." -ForegroundColor Red
+    Write-Host "Possiveis causas: token digitado errado, revogado ou ja substituido." -ForegroundColor Yellow
+    Write-Host "Abra o @BotFather, envie /mybots, escolha o bot e use 'API Token'." -ForegroundColor Yellow
+    Write-Host "Se necessario, envie /revoke para gerar um token novo e tente de novo." -ForegroundColor Yellow
+    exit 1
+}
+
+Write-Host ("[OK] Token valido. Bot: @" + $check.result.username + " (" + $check.result.first_name + ")") -ForegroundColor Green
+
 $content = Get-Content $envFile -Raw
 $content = [regex]::Replace($content, '(?m)^BOT_TOKEN=.*$', "BOT_TOKEN=$token")
 Set-Content -Path $envFile -Value $content -Encoding UTF8
