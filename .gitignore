@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+
+# Banco de dados e dados de execução
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Modelos baixados (pesados)
+models/
+
+# Logs e temporários
+*.log
+logs/
+.pytest_cache/
+.coverage
+htmlcov/
+tmp/

@@ -1,0 +1,15 @@
+# LinguaBot - dependências OPCIONAIS.
+#
+# Instale apenas se quiser usar os recursos correspondentes. O bot NÃO
+# precisa de nada disso para funcionar (veja requirements.txt).
+#
+#     pip install -r requirements-optional.txt
+
+# --- LLM na nuvem (opcional, plano gratuito com chave) ---
+# Usado quando LLM_PROVIDER=gemini.
+google-genai==1.45.0
+
+# --- TTS local, offline (opcional) ---
+# Usado quando TTS_PROVIDER=piper. Precisa também do executável piper e dos
+# arquivos de voz (.onnx) em PIPER_MODELS_DIR.
+# piper-tts            # instale conforme a documentação oficial do projeto Piper

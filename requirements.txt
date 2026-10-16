@@ -1,4 +1,26 @@
-flask
-python-telegram-bot
-google-genai
-gTTS
+# LinguaBot - dependências principais (funcionam com custo zero).
+#
+# O bot funciona SEM nenhuma API paga. As dependências abaixo cobrem:
+#   - integração com o Telegram (long polling)
+#   - persistência em SQLite (biblioteca padrão)
+#   - síntese de voz gratuita (edge-tts e gTTS)
+#   - conversão de áudio com ffmpeg embutido (imageio-ffmpeg)
+#   - imagens locais geradas (Pillow)
+
+python-telegram-bot==22.5
+python-dotenv==1.1.1
+edge-tts==7.2.3
+gTTS==2.5.4
+imageio-ffmpeg==0.6.0
+Pillow==11.3.0
+
+# Reconhecimento de fala local (gratuito, offline). Baixe os modelos com
+# scripts/download_vosk_models.py. Se não quiser voz, remova esta linha e
+# defina STT_PROVIDER=none no .env.
+vosk==0.3.45
+soundfile==0.14.0
+numpy==2.5.4
+
+# Testes
+pytest==8.4.2
+pytest-asyncio==1.2.0
