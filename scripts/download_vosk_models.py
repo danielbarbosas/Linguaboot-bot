@@ -38,14 +38,14 @@ def download(model_name: str, dest_dir: Path) -> None:
 
     url = f"{BASE_URL}/{model_name}.zip"
     zip_path = dest_dir / f"{model_name}.zip"
-    print(f"[↓] Baixando {url}")
+    print(f"[down] Baixando {url}")
     urllib.request.urlretrieve(url, zip_path)
 
-    print(f"[⇢] Extraindo {zip_path.name}")
+    print(f"[zip] Extraindo {zip_path.name}")
     with zipfile.ZipFile(zip_path) as archive:
         archive.extractall(dest_dir)
     zip_path.unlink(missing_ok=True)
-    print(f"[✓] {model_name} pronto em {target}")
+    print(f"[ok] {model_name} pronto em {target}")
 
 
 def main(argv: list[str]) -> int:

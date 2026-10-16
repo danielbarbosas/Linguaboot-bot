@@ -15,6 +15,7 @@ env/
 .env
 .env.*
 !.env.example
+chaves/
 
 # Banco de dados e dados de execução
 data/

@@ -10,12 +10,38 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-try:  # python-dotenv é opcional em tempo de import
-    from dotenv import load_dotenv
+def _load_env_files() -> None:
+    """Carrega as chaves de configuração.
 
-    load_dotenv()
-except Exception:  # pragma: no cover - apenas conveniência
-    pass
+    Ordem de precedência (o primeiro valor encontrado vence):
+    1. ``chaves/.env``  – pasta de segredos ao lado do código (recomendada)
+    2. ``./.env``       – diretório atual
+    3. ``<projeto>/.env``
+    """
+
+    try:  # python-dotenv é opcional em tempo de import
+        from dotenv import load_dotenv
+    except Exception:  # pragma: no cover - apenas conveniência
+        return
+
+    try:
+        project_root = Path(__file__).resolve().parent.parent
+    except Exception:  # pragma: no cover - defensivo
+        project_root = Path.cwd()
+
+    for candidate in (
+        project_root / "chaves" / ".env",
+        Path.cwd() / ".env",
+        project_root / ".env",
+    ):
+        try:
+            if candidate.is_file():
+                load_dotenv(candidate, override=False)
+        except Exception:  # pragma: no cover - defensivo
+            continue
+
+
+_load_env_files()
 
 
 class ConfigError(RuntimeError):
