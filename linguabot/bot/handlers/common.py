@@ -87,22 +87,31 @@ async def send_photo_from_service(
                 chat_id=chat_id, photo=handle, caption=text, reply_markup=reply_markup
             )
     except Exception:
-        await context.bot.send_message(chat_id=chat_id, text=caption, reply_markup=reply_markup)
+        await context.bot.send_message(
+            chat_id=chat_id, text=caption, reply_markup=reply_markup, parse_mode=None
+        )
     return True
 
 
 async def reply(update: Update, text: str, **kwargs) -> Message | None:
-    """Responde no contexto certo (mensagem ou callback), com tolerância a erros."""
+    """Responde no contexto certo (mensagem ou callback), com tolerância a erros.
+
+    Se o envio falhar por causa de ``parse_mode`` (ex.: texto do usuário com
+    caracteres especiais), tenta novamente como texto simples.
+    """
 
     query = update.callback_query
-    try:
-        if query is not None:
-            return await query.message.reply_text(text, **kwargs)
-        if update.message is not None:
-            return await update.message.reply_text(text, **kwargs)
-    except Exception:
+    target = query.message if query is not None else update.message
+    if target is None:
         return None
-    return None
+    try:
+        return await target.reply_text(text, **kwargs)
+    except Exception:
+        plain = {k: v for k, v in kwargs.items() if k != "parse_mode"}
+        try:
+            return await target.reply_text(text, parse_mode=None, **plain)
+        except Exception:
+            return None
 
 
 async def safe_edit(query, text: str, **kwargs) -> None:
@@ -111,7 +120,11 @@ async def safe_edit(query, text: str, **kwargs) -> None:
     try:
         await query.edit_message_text(text, **kwargs)
     except Exception:
-        pass
+        plain = {k: v for k, v in kwargs.items() if k != "parse_mode"}
+        try:
+            await query.edit_message_text(text, parse_mode=None, **plain)
+        except Exception:
+            pass
 
 
 def ui_of(context: ContextTypes.DEFAULT_TYPE) -> UILang:

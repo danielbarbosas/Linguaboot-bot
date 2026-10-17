@@ -31,7 +31,7 @@ async def handle_text(update, context, profile: UserProfileData, session: Learni
         correction_mode=profile.correction_mode,
         ui_lang=profile.ui_lang.value,
     )
-    await update.message.reply_text(reply)
+    await reply_text(update, reply)
     services.storage.users.add_xp(profile.telegram_id, 2)
 
 
