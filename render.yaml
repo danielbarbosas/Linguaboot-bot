@@ -1,0 +1,34 @@
+# Render.com free deploy (Web Service)
+# Custo zero. Configurar secret BOT_TOKEN no Render.
+
+services:
+  - type: web
+    name: linguabot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m linguabot
+    envVars:
+      - key: BOT_TOKEN
+        sync: false  # configurar manualmente (segredo)
+      - key: LOG_LEVEL
+        value: INFO
+      - key: HEALTH_ENABLED
+        value: "true"
+      - key: PORT
+        value: "10000"  # Render sobrescreve com $PORT; nosso código já usa PORT
+      - key: STT_PROVIDER
+        value: vosk
+      - key: TTS_PROVIDER
+        value: edge
+      - key: TTS_RATE
+        value: "-25%"
+      - key: DEFAULT_UI_LANG
+        value: pt
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "20"
+      - key: KIDS_MODE_ENABLED
+        value: "true"
+      # Persistência: Render free NÃO persiste disco entre deploys.
+      # Não salvar dados críticos em disco local.
+    autoDeploy: false
