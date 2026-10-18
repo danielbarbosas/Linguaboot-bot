@@ -28,6 +28,17 @@ MODELS = {
     "pt": "vosk-model-small-pt-0.3",
 }
 
+# Modelos grandes (mais precisos, ~2x melhor taxa de erro). Uso:
+#     python scripts/download_vosk_models.py es:grande
+LARGE_MODELS = {
+    "en": "vosk-model-en-us-0.22",
+    "es": "vosk-model-es-0.42",
+    "fr": "vosk-model-fr-0.22",
+    "de": "vosk-model-de-0.15",
+    "it": "vosk-model-it-0.22",
+    "pt": "vosk-model-pt-fb-v0.1.1-pruned",
+}
+
 
 def download(model_name: str, dest_dir: Path) -> None:
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -51,13 +62,20 @@ def download(model_name: str, dest_dir: Path) -> None:
 def main(argv: list[str]) -> int:
     dest_dir = Path(os.getenv("VOSK_MODELS_DIR", "./models/vosk"))
     langs = argv or list(MODELS)
-    unknown = [lang for lang in langs if lang not in MODELS]
+    unknown = [
+        lang.split(":")[0]
+        for lang in langs
+        if lang.split(":")[0] not in MODELS or (lang.endswith(":grande") and lang.split(":")[0] not in LARGE_MODELS)
+    ]
     if unknown:
         print(f"Idiomas desconhecidos: {', '.join(unknown)}")
         print(f"Disponíveis: {', '.join(MODELS)}")
+        print("Use '<idioma>:grande' para o modelo grande (ex.: es:grande).")
         return 1
     for lang in langs:
-        download(MODELS[lang], dest_dir)
+        base, _, size = lang.partition(":")
+        name = LARGE_MODELS[base] if size == "grande" else MODELS[base]
+        download(name, dest_dir)
     print("Concluído. Defina STT_PROVIDER=vosk no .env.")
     return 0
 

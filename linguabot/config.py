@@ -85,6 +85,7 @@ class Settings:
     vosk_models_dir: str = "./models/vosk"
 
     tts_provider: str = "edge"
+    tts_rate: str = "-25%"
     piper_exe: str = ""
     piper_models_dir: str = "./models/piper"
 
@@ -114,6 +115,7 @@ class Settings:
             stt_provider=os.getenv("STT_PROVIDER", "vosk").strip().lower(),
             vosk_models_dir=os.getenv("VOSK_MODELS_DIR", "./models/vosk").strip(),
             tts_provider=os.getenv("TTS_PROVIDER", "edge").strip().lower(),
+            tts_rate=os.getenv("TTS_RATE", "-25%").strip(),
             piper_exe=os.getenv("PIPER_EXE", "").strip(),
             piper_models_dir=os.getenv("PIPER_MODELS_DIR", "./models/piper").strip(),
             assets_dir=os.getenv("ASSETS_DIR", "./assets/images").strip(),

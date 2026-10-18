@@ -46,7 +46,12 @@ def _tmp(suffix: str) -> str:
 
 
 def convert_to_wav_16k_mono(src: str, dst: str | None = None) -> str:
-    """Converte qualquer áudio em WAV PCM 16 kHz mono (entrada do Vosk)."""
+    """Converte qualquer áudio em WAV PCM 16 kHz mono (entrada do Vosk).
+
+    Aplica highpass (remove ruído grave/rumble) e dynaudnorm (normaliza
+    volume) antes da conversão — gravações de celular com volume baixo
+    ou ruído de fundo são reconhecidas muito melhor com esses filtros.
+    """
 
     dst = dst or _tmp(".wav")
     _run(
@@ -55,6 +60,8 @@ def convert_to_wav_16k_mono(src: str, dst: str | None = None) -> str:
             "-y",
             "-i",
             src,
+            "-af",
+            "highpass=f=80,dynaudnorm=g=5",
             "-ac",
             "1",
             "-ar",

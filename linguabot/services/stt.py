@@ -72,17 +72,29 @@ class VoskSTT:
             language = get_language(LearnLang(lang))
         except (ValueError, KeyError):
             return None
-        if not language.vosk_model:
+        # Prefere o modelo grande (muito mais preciso); cai para o pequeno.
+        candidates = [
+            name
+            for name in (language.vosk_model_large, language.vosk_model)
+            if name
+        ]
+        if not candidates:
             logger.warning("Sem modelo Vosk definido para o idioma %s", lang)
             return None
-        model_path = self.models_dir / language.vosk_model
-        if not model_path.exists():
+        model_path: Path | None = None
+        for name in candidates:
+            candidate = self.models_dir / name
+            if candidate.exists():
+                model_path = candidate
+                break
+        if model_path is None:
             logger.warning(
                 "Modelo Vosk ausente em %s. Rode scripts/download_vosk_models.py.",
-                model_path,
+                self.models_dir / candidates[0],
             )
             return None
         vosk.SetLogLevel(-1)
+        logger.info("Carregando modelo Vosk: %s", model_path.name)
         model = vosk.Model(str(model_path))
         self._models[lang] = model
         return model

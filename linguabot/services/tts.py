@@ -45,12 +45,16 @@ class EdgeTTSEngine:
     name = "edge"
     supports_gender = True
 
+    def __init__(self, rate: str = "-25%") -> None:
+        # Velocidade reduzida por padrão para aprendizado de pronúncia.
+        self.rate = rate
+
     async def synthesize(self, text: str, lang: str, voice: Voice, out_path: str) -> str:
         import edge_tts
 
         language = get_language(LearnLang(lang))
         voice_name = language.edge_voices.get(voice) or language.edge_voices[Voice.FEMININO]
-        communicate = edge_tts.Communicate(_clean(text), voice_name)
+        communicate = edge_tts.Communicate(_clean(text), voice_name, rate=self.rate)
         await communicate.save(out_path)
         return out_path
 
@@ -160,4 +164,4 @@ def build_speech(settings: Settings) -> SpeechService:
         return SpeechService(primary, fallback)
     if settings.tts_provider == "gtts":
         return SpeechService(GTTSEngine(), None)
-    return SpeechService(EdgeTTSEngine(), fallback)
+    return SpeechService(EdgeTTSEngine(rate=settings.tts_rate), fallback)
